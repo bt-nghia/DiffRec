@@ -181,7 +181,7 @@ class TrainData(Dataset):
     def __getitem__(self, index):
         uid = index
         # prob_iids = np.array(self.ui_graph[index].todense()).reshape(-1)
-        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        prob_iids = np.array(self.ubi_graph[uid].todense()).reshape(-1)
         bun_idx = self.ub_graph[index].nonzero()[1]
         if len(bun_idx) > 0:
             rand_bun_id = np.random.choice(bun_idx)
