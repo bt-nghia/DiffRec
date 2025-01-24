@@ -135,9 +135,9 @@ class TestData():
 
         self.ui_graph = list2csr_sp_graph(self.ui_pairs, (self.num_user, self.num_item))
         self.ub_graph_train = list2csr_sp_graph(self.ub_pairs_train, (self.num_user, self.num_bundle))
-        self.bi_graph = list2csr_sp_graph(self.bi_pairs, (self.num_bundle, self.num_item))
-        self.test_uid = self.ub_graph.sum(axis=1).nonzero()[0]
         self.ub_graph_test = list2csr_sp_graph(self.ub_pairs_test, (self.num_user, self.num_bundle))
+        self.bi_graph = list2csr_sp_graph(self.bi_pairs, (self.num_bundle, self.num_item))
+        self.test_uid = self.ub_graph_test.sum(axis=1).nonzero()[0]
 
         self.ubi_graph = self.ub_graph_train @ self.bi_graph
 
