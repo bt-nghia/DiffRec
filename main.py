@@ -142,17 +142,15 @@ def inference(model, state, test_dataloader, noise_scheduler, key, n_item):
 
 def eval(conf, test_data, all_gen_buns):
     batch_size = conf["batch_size"]
-    ui_mat = test_data.ui_graph
     bi_mat = test_data.bi_graph
     ub_mask_graph = test_data.ub_graph_train
     ub_mat = test_data.ub_graph_test
 
     uids_test = test_data.test_uid
-    num_batch = int(len(uids_test) / batch_size)
     batch_idx = np.arange(0, len(uids_test))
     test_batch_loader = DataLoader(batch_idx, batch_size=batch_size, shuffle=False, drop_last=False)
 
-    for topk in [1, 2, 3, 5, 10, 20, 40, 50]:
+    for topk in [10, 20, 40, 50]:
         recall_cnt = 0
         pre_cnt = 0
         ndcg_cnt = 0
@@ -163,7 +161,6 @@ def eval(conf, test_data, all_gen_buns):
 
             uids_test_batch = uids_test[start:end+1]
             ub_mask_graph_batch = ub_mask_graph[uids_test_batch]
-            # all_gen_buns_batch = all_gen_buns[uids_test_batch]
             all_gen_buns_batch = all_gen_buns[start:end+1]
             
             r_cnt, p_cnt, n_cnt = cal_metrics(all_gen_buns_batch,
@@ -175,9 +172,10 @@ def eval(conf, test_data, all_gen_buns):
             pre_cnt+=p_cnt
             ndcg_cnt+=n_cnt
 
-        print("Recall@%i: %s" %(topk, recall_cnt / len(uids_test)))
-        print("Precision@%i: %s" %(topk, pre_cnt / len(uids_test)))
-        print("NDCG@%i: %s" %(topk, ndcg_cnt / len(uids_test)))
+        res_line = "Recall@%i: %.4f" % (topk, recall_cnt / len(uids_test)) + \
+                   " | " + "Precision@%i: %.4f" % (topk, pre_cnt / len(uids_test)) + \
+                   " | " + "NDCG@%i: %.4f" % (topk, ndcg_cnt / len(uids_test))
+        print(res_line)
 
 
 def main():
