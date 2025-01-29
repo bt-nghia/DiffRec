@@ -93,10 +93,10 @@ class DiffusionScheduler:
     ):
         super().__init__()
         self.betas = jnp.linspace(beta_start, beta_end, num_train_timestep)
-        self.sqrt_one_minus_betas = jnp.sqrt(1-self.betas)
+        self.sqrt_one_minus_betas = jnp.sqrt(1 - self.betas)
         self.alphas = 1 - self.betas
         self.alphas_cum_prod = jnp.cumprod(self.alphas, axis=0)
-        self.sqrt_one_minus_alphas_cum_prod = jnp.sqrt(1-self.alphas_cum_prod)
+        self.sqrt_one_minus_alphas_cum_prod = jnp.sqrt(1 - self.alphas_cum_prod)
         self.sqrt_alphas_cum_prod = jnp.sqrt(self.alphas_cum_prod)
         self.timestep = jnp.arange(0, num_train_timestep)[::-1] + 1
 
@@ -116,8 +116,9 @@ class DiffusionScheduler:
             t,
             x_t_1,
     ):
-        x_t_out = x_t * (1/t) + x_t_1 * (1 - 1 / t)
+        x_t_out = x_t * (1 / t) + x_t_1 * (1 - 1 / t)
         return x_t_out
+
 
 '''
 Generation Dataloader
