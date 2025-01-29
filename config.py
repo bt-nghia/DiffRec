@@ -1,5 +1,4 @@
 conf = {
-    "ckpt_path": "/checkpoints",
     "data_path": "datasets",
     "n_head": 2,
     "n_aspect": 4,

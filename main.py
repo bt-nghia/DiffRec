@@ -1,4 +1,7 @@
 from argparse import ArgumentParser
+import os
+import pickle
+import datetime
 
 import jax
 import optax
@@ -271,9 +274,16 @@ def main():
                                   drop_last=False)
 
     """
-    Training & Save checkpoint
+    Training
     """
     state = train(state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
+    """
+    Save checkpoint
+    """
+    now = datetime.datetime.now()
+    timestamp = now.isoformat()
+    with open(os.path.join(conf["data_path"], conf["dataset"], timestamp + "model_params.pkl"), "wb") as f:
+        pickle.dump(state.params, f)
     """
     Generate & Evaluate
     """
