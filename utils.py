@@ -100,18 +100,6 @@ class DiffusionScheduler:
         self.sqrt_alphas_cum_prod = jnp.sqrt(self.alphas_cum_prod)
         self.timestep = jnp.arange(0, num_train_timestep)[::-1] + 1
 
-        # print(self.sqrt_one_minus_alphas_cum_prod[5], self.sqrt_alphas_cum_prod[5])
-        # exit()
-    # def add_noise(
-    #         self,
-    #         original_samples,
-    #         noise,
-    #         timestep,
-    # ):
-    #     noisy_input = original_samples * (1 - self.betas[timestep].reshape(-1, 1)) \
-    #                   + noise * self.betas[timestep].reshape(-1, 1)
-    #     return noisy_input
-
     def add_noise(
             self,
             x_t_1,
@@ -122,7 +110,6 @@ class DiffusionScheduler:
                epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
         return x_t
 
-
     def step(
             self,
             x_t,
@@ -131,17 +118,6 @@ class DiffusionScheduler:
     ):
         x_t_out = x_t * (1/t) + x_t_1 * (1 - 1 / t)
         return x_t_out
-
-
-    # def step(
-    #         self,
-    #         model_output,
-    #         time_step,
-    #         post_output,
-    # ):
-    #     prev_pred = post_output * (1 - 1 / time_step) + model_output * (1 / time_step)
-    #     return prev_pred
-
 
 '''
 Generation Dataloader
