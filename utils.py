@@ -110,14 +110,23 @@ class DiffusionScheduler:
                epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
         return x_t
 
-    def step(
+    # def step(
+    #         self,
+    #         x_t,
+    #         t,
+    #         x_t_1,
+    # ):
+    #     x_t_out = x_t * (1 / t) + x_t_1 * (1 - 1 / t)
+    #     return x_t_out
+
+    def polyak_update(
             self,
             x_t,
-            t,
             x_t_1,
+            t,
     ):
-        x_t_out = x_t * (1 / t) + x_t_1 * (1 - 1 / t)
-        return x_t_out
+        x_t_1_out = x_t_1 * (1 / t) + x_t * (1 - 1 / t)
+        return x_t_1_out
 
 
 '''
