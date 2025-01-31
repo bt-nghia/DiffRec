@@ -6,3 +6,4 @@ res.MD
 log.MD
 baselines_log.MD
 .idea
+*.pkl
