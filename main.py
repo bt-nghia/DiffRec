@@ -127,8 +127,8 @@ def train(
         pbar = tqdm(dataloader)
         for uids, prob_iids, prob_iids_bundle in pbar:
             uids = jnp.array(uids, dtype=jnp.int32)
-            prob_iids = jnp.array(prob_iids, dtype=jnp.float32)
-            prob_iids_bundle = jnp.array(prob_iids_bundle, jnp.float32)
+            prob_iids = scale_probability(jnp.array(prob_iids, dtype=jnp.float32)) # [-1, 1]
+            prob_iids_bundle = scale_probability(jnp.array(prob_iids_bundle, jnp.float32)) # [-1, 1]
 
             randkey, timekey, key = jax.random.split(key, num=3)
             noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
@@ -163,7 +163,7 @@ def inference(
             model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
             post_prob_iids_bundle = noise_scheduler.polyak_update(x_t=post_prob_iids_bundle, x_t_1=model_output, t=t)
 
-        all_genbundles.append(post_prob_iids_bundle)
+        all_genbundles.append(reverse_scale_probability(post_prob_iids_bundle))
     all_genbundles = np.concatenate(all_genbundles, axis=0)
     return all_genbundles
 

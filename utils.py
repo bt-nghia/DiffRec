@@ -10,6 +10,24 @@ from config import *
 TOTAL_TIMESTEP = conf["timestep"]
 
 
+def scale_probability(x):
+    """
+    x [0, 1]
+    2 * x [0, 2]
+    2 * x - 1 [-1, 1]
+    """
+    return x * 2 - 1
+
+
+def reverse_scale_probability(x):
+    """
+    x [-1, 1]
+    x + 1 [0, 2]
+    0.5 * (x + 1) [0, 1]
+    """
+    return (x + 1) * 0.5
+
+
 def get_pairs(file_path):
     xy = pd.read_csv(file_path, sep="\t", names=["x", "y"])
     xy = xy.to_numpy()

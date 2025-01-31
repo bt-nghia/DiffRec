@@ -117,7 +117,11 @@ class PredLayer(nn.Module):
             residual_feat
     ):
         out = self.lin(x) + residual_feat
-        logits = nn.sigmoid(out)
+        """
+        tanh scale [-1, 1]
+        sigmoid scale [0, 1]
+        """
+        logits = nn.tanh(out)
         return logits
 
 
