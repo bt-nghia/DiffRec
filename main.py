@@ -134,7 +134,7 @@ def train(
             noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
             timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
-            noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
+            noisy_prob_iids_bundle = noise_scheduler.add_noise(x_0=prob_iids_bundle, epsilon=noise, t=timestep)
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
                                                                        prob_iids_bundle)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (

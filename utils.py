@@ -102,11 +102,11 @@ class DiffusionScheduler:
 
     def add_noise(
             self,
-            x_t_1,
+            x_0,
             epsilon,
             t
     ):
-        x_t = (x_t_1 * self.sqrt_alphas_cum_prod[t].reshape(-1, 1) +
+        x_t = (x_0 * self.sqrt_alphas_cum_prod[t].reshape(-1, 1) +
                epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
         return x_t
 
