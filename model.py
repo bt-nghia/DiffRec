@@ -21,14 +21,6 @@ def normalize(x, p=2, dim=1, eps=1e-12):
     return x / norm
 
 
-def laplace_norm(mat):
-    # mat: sp.coo_matrix
-    norm1 = sp.diags(1 / (np.sqrt(mat.sum(axis=1).A.ravel()) + 1e-8))
-    norm2 = sp.diags(1 / (np.sqrt(mat.sum(axis=0).A.ravel()) + 1e-8))
-    norm_mat = norm1 @ mat @ norm2
-    return norm_mat
-
-
 def scaled_dot_product(q, k, v):
     dim = q.shape[-1]
     attn = jnp.matmul(q, k.swapaxes(-1, -2)) / dim ** -0.5
@@ -123,7 +115,8 @@ class PredLayer(nn.Module):
 
 class Net(nn.Module):
     conf: dict
-    ui_graph: sp.coo_matrix
+    # ui_graph: sp.coo_matrix
+    # ui_propagate_graph: sparse.BCOO
 
     def setup(self):
         self.n_users = self.conf["n_user"]
@@ -143,23 +136,24 @@ class Net(nn.Module):
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
 
-        self.ui_propagate_graph = self.get_propagate_graph()
+        # self.ui_propagate_graph = self.get_propagate_graph()
 
-    def get_propagate_graph(self):
-        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
-                                      [self.ui_graph.T,
-                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
-        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
-        return ui_propagate_graph
+    # def get_propagate_graph(self):
+    #     ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
+    #                                   [self.ui_graph.T,
+    #                                    sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
+    #     ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
+    #     return ui_propagate_graph -> move to utils.py
 
     def propagate(
             self,
-            num_layers=2
+            ui_propagate_graph,
+            num_layers=2,
     ):
         features = jnp.concatenate([self.user_emb, self.item_emb], axis=0)
         all_features = [features]
         for i in range(0, num_layers):
-            features = self.ui_propagate_graph @ features
+            features = ui_propagate_graph @ features
             features = features / (i + 2)
             features = normalize(features)
             all_features.append(features)
@@ -172,14 +166,15 @@ class Net(nn.Module):
             self,
             uids,
             prob_iids,
-            prob_iids_bundle
+            prob_iids_bundle,
+            ui_propagate_graph
     ):
         """
         uids: user ids
         prob_iids: user's item probability
         prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
         """
-        u_feat, i_feat = self.propagate()
+        u_feat, i_feat = self.propagate(ui_propagate_graph)
         users_feat = u_feat[uids]
 
         users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)

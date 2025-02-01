@@ -10,6 +10,14 @@ from config import *
 TOTAL_TIMESTEP = conf["timestep"]
 
 
+def laplace_norm(mat):
+    # mat: sp.coo_matrix
+    norm1 = sp.diags(1 / (np.sqrt(mat.sum(axis=1).A.ravel()) + 1e-8))
+    norm2 = sp.diags(1 / (np.sqrt(mat.sum(axis=0).A.ravel()) + 1e-8))
+    norm_mat = norm1 @ mat @ norm2
+    return norm_mat
+
+
 def get_pairs(file_path):
     xy = pd.read_csv(file_path, sep="\t", names=["x", "y"])
     xy = xy.to_numpy()
@@ -237,6 +245,7 @@ class TrainDataVer2(Dataset):
         self.ubi_graph = self.ub_graph @ self.bi_graph
         self.uibi_graph = self.ui_graph + self.ub_graph @ self.bi_graph
         self.zeros_prob_iids = np.zeros((self.num_item,))
+        self.ui_propagate_graph = self.get_propagate_graph()
 
     def __getitem__(self, index):
         uid, bid = self.ub_pairs[index]
@@ -246,6 +255,13 @@ class TrainDataVer2(Dataset):
 
     def __len__(self):
         return len(self.ub_pairs)
+
+    def get_propagate_graph(self):
+        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
+                                      [self.ui_graph.T,
+                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
+        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
+        return ui_propagate_graph
 
 # meal_cold
 # class TrainData(Dataset):

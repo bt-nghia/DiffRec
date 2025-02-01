@@ -87,16 +87,18 @@ def train_step(
         uids,
         prob_iids,
         noisy_prob_iids_bundle,
-        prob_iids_bundle
+        prob_iids_bundle,
+        ui_propagate_graph,
 ):
     def loss_fn(
             params,
             uids,
             prob_iids,
             noisy_prob_iids_bundle,
-            prob_iids_bundle
+            prob_iids_bundle,
+            ui_propagate_graph
     ):
-        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle)
+        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle, ui_propagate_graph)
         mse_loss = mse(logits, prob_iids_bundle)  # MSE
 
         slogits = nn.softmax(logits)
@@ -107,7 +109,7 @@ def train_step(
         return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
 
     aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids, noisy_prob_iids_bundle,
-                                                           prob_iids_bundle)
+                                                           prob_iids_bundle, ui_propagate_graph)
     state = state.apply_gradients(grads=grads)
     loss, aux_dict = aux
     return state, loss, aux_dict
@@ -115,6 +117,7 @@ def train_step(
 
 def train(
         state,
+        ui_propagate_graph,
         dataloader,
         noise_scheduler,
         epochs,
@@ -136,7 +139,7 @@ def train(
 
             noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
-                                                                       prob_iids_bundle)
+                                                                       prob_iids_bundle, ui_propagate_graph)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -243,12 +246,12 @@ def main():
     sample_uids = jnp.array([0])
     sample_prob_iids = jnp.empty((1, conf["n_item"]))
     sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
-    model = Net(conf, train_data.ui_graph)
+    model = Net(conf)
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
-    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
+    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle, train_data.ui_propagate_graph)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
@@ -276,7 +279,7 @@ def main():
     """
     Training
     """
-    state = train(state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
+    state = train(state, train_data.ui_propagate_graph, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
     """
     Save checkpoint
     """
