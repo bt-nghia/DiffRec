@@ -127,8 +127,8 @@ def train(
         pbar = tqdm(dataloader)
         for uids, prob_iids, prob_iids_bundle in pbar:
             uids = jnp.array(uids, dtype=jnp.int32)
-            prob_iids = scale_probability(jnp.array(prob_iids, dtype=jnp.float32)) # [-1, 1]
-            prob_iids_bundle = scale_probability(jnp.array(prob_iids_bundle, jnp.float32)) # [-1, 1]
+            prob_iids = scale_probability(jnp.array(prob_iids, dtype=jnp.float32))  # [-1, 1]
+            prob_iids_bundle = scale_probability(jnp.array(prob_iids_bundle, jnp.float32))  # [-1, 1]
 
             randkey, timekey, key = jax.random.split(key, num=3)
             noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
