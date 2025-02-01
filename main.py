@@ -147,6 +147,7 @@ def train(
 
 def inference(
         model,
+        ui_propagate_graph,
         state,
         test_dataloader,
         noise_scheduler,
@@ -163,7 +164,7 @@ def inference(
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
+            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle, ui_propagate_graph)
             post_prob_iids_bundle = noise_scheduler.polyak_update(x_t=post_prob_iids_bundle, x_t_1=model_output, t=t)
 
         all_genbundles.append(post_prob_iids_bundle)
@@ -251,7 +252,8 @@ def main():
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
-    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle, train_data.ui_propagate_graph)
+    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle,
+                        train_data.ui_propagate_graph)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
@@ -293,12 +295,14 @@ def main():
     rng_infer_test, rng_infer_valid = jax.random.split(rng_infer)
 
     print("VALIDATING")
-    generated_bundles_valid = inference(model, state, valid_dataloader, noise_scheduler, rng_infer_valid,
+    generated_bundles_valid = inference(model, train_data.ui_propagate_graph, state, valid_dataloader, noise_scheduler,
+                                        rng_infer_valid,
                                         conf["n_item"])
     eval(conf, valid_data, generated_bundles_valid)
 
     print("TESTING")
-    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
+    generated_bundles_test = inference(model, train_data.ui_propagate_graph, state, test_dataloader, noise_scheduler,
+                                       rng_infer_test, conf["n_item"])
     eval(conf, test_data, generated_bundles_test)
 
 

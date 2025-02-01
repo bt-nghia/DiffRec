@@ -1,8 +1,5 @@
 import jax.numpy as jnp
-import numpy as np
-import scipy.sparse as sp
 from flax import linen as nn
-from jax.experimental import sparse
 
 INF = 1e8
 
@@ -115,8 +112,6 @@ class PredLayer(nn.Module):
 
 class Net(nn.Module):
     conf: dict
-    # ui_graph: sp.coo_matrix
-    # ui_propagate_graph: sparse.BCOO
 
     def setup(self):
         self.n_users = self.conf["n_user"]
@@ -135,15 +130,6 @@ class Net(nn.Module):
         self.enc = nn.Dense(self.hidden_dim,
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
-
-        # self.ui_propagate_graph = self.get_propagate_graph()
-
-    # def get_propagate_graph(self):
-    #     ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
-    #                                   [self.ui_graph.T,
-    #                                    sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
-    #     ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
-    #     return ui_propagate_graph -> move to utils.py
 
     def propagate(
             self,
