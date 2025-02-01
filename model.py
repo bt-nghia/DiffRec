@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.sparse as sp
@@ -147,7 +148,7 @@ class Net(nn.Module):
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
 
-        self.ui_propagate_graph = self.get_propagate_graph()
+        self.ui_propagate_graph = jax.lax.stop_gradient(self.get_propagate_graph())
 
     def get_propagate_graph(self):
         ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
