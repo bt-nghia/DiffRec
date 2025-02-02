@@ -75,8 +75,7 @@ def cal_metrics(
 
 def kl_divergence(src, trg):
     kl_div = trg * (jnp.log(trg) - jnp.log(src))
-    return jnp.mean(kl_div)
-    # return jnp.sum(kl_div)
+    return jnp.sum(kl_div)
 
 def mse(x, y):
     return jnp.mean((x - y) ** 2)
