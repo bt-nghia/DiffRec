@@ -56,7 +56,7 @@ def list2csr_sp_graph(list_index, shape):
         (np.ones(list_index.shape[0]), (list_index[:, 0], list_index[:, 1])),
         shape=shape
     ).tocsr()
-    return sp_graph > 0
+    return (sp_graph > 0).astype("int")
 
 
 def graph2list(graph):
@@ -251,6 +251,56 @@ class TrainDataVer2(Dataset):
         uid, bid = self.ub_pairs[index]
         prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
         prob_iids_bundle = np.array(self.bi_graph[bid].todense()).reshape(-1)
+        return uid, prob_iids, prob_iids_bundle
+
+    def __len__(self):
+        return len(self.ub_pairs)
+
+    def get_propagate_graph(self):
+        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
+                                      [self.ui_graph.T,
+                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
+        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
+        return ui_propagate_graph
+
+
+class TrainDataVer3(Dataset):
+    """
+    return
+    user id -> for personalize
+    item prob -> for guidance
+    item (bundle) -> for denoised
+    """
+
+    def __init__(self, conf):
+        super().__init__()
+        self.conf = conf
+        # we use bundle id to easily link bundle to user for train and test purpose
+        self.num_user = self.conf["n_user"]
+        self.num_item = self.conf["n_item"]
+        self.num_bundle = self.conf["n_bundle"]
+
+        self.ui_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/user_item.txt")
+        self.ub_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/user_bundle_train.txt")
+        self.bi_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/bundle_item.txt")
+
+        self.ui_graph = list2csr_sp_graph(self.ui_pairs, (self.num_user, self.num_item))
+        self.ub_graph = list2csr_sp_graph(self.ub_pairs, (self.num_user, self.num_bundle))
+        self.bi_graph = list2csr_sp_graph(self.bi_pairs, (self.num_bundle, self.num_item))
+
+        self.ubi_graph = self.ub_graph @ self.bi_graph
+        self.uibi_graph = self.ui_graph + self.ub_graph @ self.bi_graph
+        self.zeros_prob_iids = np.zeros((self.num_item,))
+        self.ui_propagate_graph = self.get_propagate_graph()
+
+    def __getitem__(self, index):
+        uid, bid = self.ub_pairs[index]
+        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        while True:
+            nbid = np.random.choice(self.num_bundle)
+            if self.ub_graph[uid, nbid] == 0:
+                break
+        prob_iids_bundle = np.array(self.bi_graph[bid].todense() - self.bi_graph[nbid].todense()).reshape(-1)
         return uid, prob_iids, prob_iids_bundle
 
     def __len__(self):
