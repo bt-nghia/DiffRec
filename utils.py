@@ -89,9 +89,9 @@ def make_sp_diag_mat(n):
 
 
 class DiffusionScheduler:
-    '''
+    """
     replicate & simplified code from diffusers.DDPMScheduler
-    '''
+    """
 
     def __init__(
             self,
@@ -117,15 +117,6 @@ class DiffusionScheduler:
         x_t = (x_t_1 * self.sqrt_alphas_cum_prod[t].reshape(-1, 1) +
                epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
         return x_t
-
-    # def step(
-    #         self,
-    #         x_t,
-    #         t,
-    #         x_t_1,
-    # ):
-    #     x_t_out = x_t * (1 / t) + x_t_1 * (1 - 1 / t)
-    #     return x_t_out
 
     def polyak_update(
             self,
@@ -313,6 +304,67 @@ class TrainDataVer3(Dataset):
         ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
         return ui_propagate_graph
 
+
+class TrainDataVer4(Dataset):
+    """
+    STRICT SAMPLING
+    return
+    user id -> for personalize
+    item prob -> for guidance
+    item (bundle) -> for denoised
+    """
+
+    def __init__(self, conf):
+        super().__init__()
+        self.conf = conf
+        # we use bundle id to easily link bundle to user for train and test purpose
+        self.num_user = self.conf["n_user"]
+        self.num_item = self.conf["n_item"]
+        self.num_bundle = self.conf["n_bundle"]
+
+        self.ui_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/user_item.txt")
+        self.ub_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/user_bundle_train.txt")
+        self.bi_pairs = get_pairs(f"{self.conf['data_path']}/{self.conf['dataset']}/bundle_item.txt")
+
+        self.ui_graph = list2csr_sp_graph(self.ui_pairs, (self.num_user, self.num_item))
+        self.ub_graph = list2csr_sp_graph(self.ub_pairs, (self.num_user, self.num_bundle))
+        self.bi_graph = list2csr_sp_graph(self.bi_pairs, (self.num_bundle, self.num_item))
+
+        self.ubi_graph = self.ub_graph @ self.bi_graph
+        self.uibi_graph = self.ui_graph + self.ub_graph @ self.bi_graph > 0
+        self.strict_bundle_mat = self.uibi_graph @ self.bi_graph.T
+        # print(self.strict_bundle_mat.shape)
+        self.u_have_strict = (self.strict_bundle_mat.sum(axis=1) < self.num_bundle)
+        # print(self.u_have_strict.shape)
+        # print(self.u_have_strict[0])
+        # if self.u_have_strict[0]:
+        #     print("True")
+        self.zeros_prob_iids = np.zeros((self.num_item,))
+        self.ui_propagate_graph = self.get_propagate_graph()
+
+    def __getitem__(self, index):
+        uid, bid = self.ub_pairs[index]
+        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        if self.u_have_strict[uid]:
+            while True:
+                nbid = np.random.choice(self.num_bundle)
+                if self.strict_bundle_mat[uid, nbid] == 0:
+                    break
+            neg_prob = self.bi_graph[nbid].todense()
+        else:
+            neg_prob = np.zeros(self.num_item)
+        prob_iids_bundle = np.array(self.bi_graph[bid].todense() - neg_prob).reshape(-1)
+        return uid, prob_iids, prob_iids_bundle
+
+    def __len__(self):
+        return len(self.ub_pairs)
+
+    def get_propagate_graph(self):
+        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
+                                      [self.ui_graph.T,
+                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
+        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
+        return ui_propagate_graph
 # meal_cold
 # class TrainData(Dataset):
 #     """
