@@ -110,19 +110,21 @@ def train_step(
         kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
 
         loss = mse_loss + kl_loss
-        return loss
+        return loss, {"kl": kl_loss, "mse": mse_loss, "loss": loss}
 
-    state_replicated = jax.device_put_replicated(state, jax.devices())
-    loss, grads = jax.value_and_grad(loss_fn)(state_replicated,
+    loss_aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params,
                                                             uids,
                                                             prob_iids,
-                                                           noisy_prob_iids_bundle_t,
-                                                           noisy_prob_iids_bundle_t_1,
-                                                           prob_iids_bundle)
+                                                            noisy_prob_iids_bundle_t,
+                                                            noisy_prob_iids_bundle_t_1,
+                                                            prob_iids_bundle)
     pgrads = jax.lax.pmean(grads, axis_name="batch")
-    ploss = jax.lax.pmean(loss, axis_name="batch")
-    state = state.apply_gradients(grads=grads)
-    loss, aux_dict = aux
+    state = state.apply_gradients(grads=pgrads)
+    loss, aux_dict = loss_aux
+    # ploss = jax.lax.pmean(loss, axis_name="batch") # mean of all loss broadcast to same shape
+    # aux_dict["kl"] = aux_dict["kl"].mean()
+    # aux_dict["mse"] = aux_dict["mse"].mean()
+    # aux_dict["loss"] = aux_dict["loss"].mean()
     return state, loss, aux_dict
 
 
@@ -158,12 +160,14 @@ def train(
             noisy_prob_iids_bundle_t = noisy_prob_iids_bundle_t.reshape(n_device, 2048 // n_device, -1)
             noisy_prob_iids_bundle_t_1 = noisy_prob_iids_bundle_t_1.reshape(n_device, 2048 // n_device, -1)
             prob_iids_bundle = prob_iids_bundle.reshape(n_device, 2048 // n_device, -1)
-            state, loss, aux_dict = jax.pmap(train_step, axis_name="batch")(state, uids, prob_iids,
-                                                noisy_prob_iids_bundle_t,
-                                                noisy_prob_iids_bundle_t_1,
-                                                prob_iids_bundle)
+            state_replicated = jax.device_put_replicated(state, jax.devices())
+
+            state, loss, aux_dict = jax.pmap(train_step, axis_name="batch")(state_replicated, uids, prob_iids,
+                                                                            noisy_prob_iids_bundle_t,
+                                                                            noisy_prob_iids_bundle_t_1,
+                                                                            prob_iids_bundle)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
-                epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
+                epoch, jnp.mean(aux_dict["loss"]), jnp.mean(aux_dict["kl"]), jnp.mean(aux_dict["mse"])))
     return state
 
 
