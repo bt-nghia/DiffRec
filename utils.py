@@ -81,9 +81,9 @@ def make_sp_diag_mat(n):
 
 
 class DiffusionScheduler:
-    '''
+    """
     replicate & simplified code from diffusers.DDPMScheduler
-    '''
+    """
 
     def __init__(
             self,
@@ -110,15 +110,6 @@ class DiffusionScheduler:
         x_t = (x_t_1 * self.sqrt_alphas_cum_prod[t].reshape(-1, 1) +
                epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
         return x_t
-
-    # def step(
-    #         self,
-    #         x_t,
-    #         t,
-    #         x_t_1,
-    # ):
-    #     x_t_out = x_t * (1 / t) + x_t_1 * (1 - 1 / t)
-    #     return x_t_out
 
     def polyak_update(
             self,
