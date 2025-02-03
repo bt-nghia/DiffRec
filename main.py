@@ -77,6 +77,10 @@ def kl_divergence(src, trg):
     return jnp.sum(kl_div)
 
 
+def sse(x, y):
+    return jnp.mean((x - y) ** 2)
+
+
 def mse(x, y):
     return jnp.mean((x - y) ** 2)
 
