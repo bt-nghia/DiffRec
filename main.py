@@ -86,18 +86,20 @@ def train_step(
         state,
         uids,
         prob_iids,
-        noisy_prob_iids_bundle,
+        noisy_prob_iids_bundle_t,
+        noisy_prob_iids_bundle_t_1,
         prob_iids_bundle
 ):
     def loss_fn(
             params,
             uids,
             prob_iids,
-            noisy_prob_iids_bundle,
+            noisy_prob_iids_bundle_t,
+            noisy_prob_iids_bundle_t_1,
             prob_iids_bundle
     ):
-        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle)
-        mse_loss = mse(logits, prob_iids_bundle)  # MSE
+        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle_t)
+        mse_loss = mse(logits, noisy_prob_iids_bundle_t_1)  # MSE
 
         slogits = nn.softmax(logits)
         sprob_iids = nn.softmax(prob_iids)
@@ -106,7 +108,9 @@ def train_step(
         loss = mse_loss + kl_loss
         return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
 
-    aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids, noisy_prob_iids_bundle,
+    aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids,
+                                                           noisy_prob_iids_bundle_t,
+                                                           noisy_prob_iids_bundle_t_1,
                                                            prob_iids_bundle)
     state = state.apply_gradients(grads=grads)
     loss, aux_dict = aux
@@ -130,13 +134,18 @@ def train(
             prob_iids = jnp.array(prob_iids, dtype=jnp.float32)
             prob_iids_bundle = jnp.array(prob_iids_bundle, jnp.float32)
 
-            randkey, timekey, key = jax.random.split(key, num=3)
-            noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
-            noise = jnp.clip(noise, 0)
+            randkey_t, rand_key_t_1, timekey, key = jax.random.split(key, num=4)
+            noise_t = jax.random.normal(randkey_t, shape=prob_iids_bundle.shape)
+            noise_t = jnp.clip(noise_t, 0)
+            noise_t_1 = jax.random.normal(rand_key_t_1, shape=prob_iids_bundle.shape)
+            noise_t_1 = jnp.clip(noise_t_1, 0)
             timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
-            noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
-            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
+            noisy_prob_iids_bundle_t = noise_scheduler.add_noise(prob_iids_bundle, noise_t, timestep)
+            noisy_prob_iids_bundle_t_1 = noise_scheduler.add_noise(prob_iids_bundle, noise_t_1, timestep - 1)
+            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids,
+                                                                       noisy_prob_iids_bundle_t,
+                                                                       noisy_prob_iids_bundle_t_1,
                                                                        prob_iids_bundle)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
