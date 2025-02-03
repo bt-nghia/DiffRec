@@ -100,6 +100,7 @@ def train_step(
     ):
         logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle_t)
         mse_loss = mse(logits, noisy_prob_iids_bundle_t_1)  # MSE
+        # mse_loss = mse(logits, prob_iids_bundle) # MSE original compared
 
         slogits = nn.softmax(logits)
         sprob_iids = nn.softmax(prob_iids)
