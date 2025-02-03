@@ -33,7 +33,6 @@ def cal_metrics(
         ub_mat, bi_mat,
         topk
 ):
-    recall_cnt, pre_cnt, ndcg_cnt, cnt = 0, 0, 0, 0
     pred_score = all_gen_buns_batch @ bi_mat.T
     ub_mask_graph_batch = ub_mask_graph_batch.todense()
 
