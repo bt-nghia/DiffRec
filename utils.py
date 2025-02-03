@@ -88,8 +88,8 @@ class DiffusionScheduler:
     def __init__(
             self,
             num_train_timestep=TOTAL_TIMESTEP,
-            beta_start=0,
-            beta_end=1
+            beta_start=1e-3,
+            beta_end=1e-1,
     ):
         super().__init__()
         self.betas = jnp.linspace(beta_start, beta_end, num_train_timestep)
