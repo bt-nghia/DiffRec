@@ -5,6 +5,7 @@ import datetime
 
 import jax
 import optax
+import jax.numpy as jnp
 from flax import linen as nn
 from flax.training import train_state
 from torch.utils.data import DataLoader
@@ -20,7 +21,6 @@ INF = 1e8
 
 def get_args():
     argp = ArgumentParser()
-    argp.add_argument("--device_id", type=int, default=0)
     argp.add_argument("--dataset", type=str, default="clothing")
     argp.add_argument("--data_path", type=str, default="datasets/cold_bundles")
     args = argp.parse_args()
@@ -110,12 +110,17 @@ def train_step(
         kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
 
         loss = mse_loss + kl_loss
-        return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
+        return loss
 
-    aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids,
+    state_replicated = jax.device_put_replicated(state, jax.devices())
+    loss, grads = jax.value_and_grad(loss_fn)(state_replicated,
+                                                            uids,
+                                                            prob_iids,
                                                            noisy_prob_iids_bundle_t,
                                                            noisy_prob_iids_bundle_t_1,
                                                            prob_iids_bundle)
+    pgrads = jax.lax.pmean(grads, axis_name="batch")
+    ploss = jax.lax.pmean(loss, axis_name="batch")
     state = state.apply_gradients(grads=grads)
     loss, aux_dict = aux
     return state, loss, aux_dict
@@ -124,9 +129,9 @@ def train_step(
 def train(
         state,
         dataloader,
+        n_device,
         noise_scheduler,
         epochs,
-        device,
         key
 ):
     print("TRAINING")
@@ -147,10 +152,16 @@ def train(
 
             noisy_prob_iids_bundle_t = noise_scheduler.add_noise(prob_iids_bundle, noise_t, timestep)
             noisy_prob_iids_bundle_t_1 = noise_scheduler.add_noise(prob_iids_bundle, noise_t_1, timestep - 1)
-            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids,
-                                                                       noisy_prob_iids_bundle_t,
-                                                                       noisy_prob_iids_bundle_t_1,
-                                                                       prob_iids_bundle)
+
+            uids = uids.reshape(n_device, 2048 // n_device, -1)
+            prob_iids = prob_iids.reshape(n_device, 2048 // n_device, -1)
+            noisy_prob_iids_bundle_t = noisy_prob_iids_bundle_t.reshape(n_device, 2048 // n_device, -1)
+            noisy_prob_iids_bundle_t_1 = noisy_prob_iids_bundle_t_1.reshape(n_device, 2048 // n_device, -1)
+            prob_iids_bundle = prob_iids_bundle.reshape(n_device, 2048 // n_device, -1)
+            state, loss, aux_dict = jax.pmap(train_step, axis_name="batch")(state, uids, prob_iids,
+                                                noisy_prob_iids_bundle_t,
+                                                noisy_prob_iids_bundle_t_1,
+                                                prob_iids_bundle)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -238,9 +249,7 @@ def main():
     conf["n_user"] = nu
     conf["n_item"] = ni
     conf["n_bundle"] = nb
-    devices = jax.devices()
-    device = devices[args.device_id]
-    conf["device"] = device
+    n_device = jax.device_count()
 
     rng_infer, rng_gen, rng_model = jax.random.split(jax.random.PRNGKey(2025), num=3)
     np.random.seed(2025)
@@ -291,7 +300,7 @@ def main():
     """
     Training
     """
-    state = train(state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
+    state = train(state, dataloader, n_device, noise_scheduler, conf["epoch"], rng_gen)
     """
     Save checkpoint
     """
