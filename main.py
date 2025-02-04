@@ -160,7 +160,7 @@ def inference(
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
+            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle, method=model.infer_u_cold)
             post_prob_iids_bundle = noise_scheduler.polyak_update(x_t=post_prob_iids_bundle, x_t_1=model_output, t=t)
 
         all_genbundles.append(post_prob_iids_bundle)
