@@ -191,3 +191,28 @@ class Net(nn.Module):
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
         out_feat = self.mlp(in_feat, prob_iids)
         return out_feat
+
+
+    def infer_u_cold(
+            self,
+            uids,
+            prob_iids,
+            prob_iids_bundle
+    ):
+        """
+                uids: user ids
+                prob_iids: user's item probability
+                prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
+                """
+        u_feat, i_feat = self.propagate()
+        users_feat = u_feat[uids] * 0 # mask all cold users
+
+        # users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        # for l in self.encoder:
+        #     users_feat = l(users_feat)
+        # users_feat = users_feat.reshape(-1, self.hidden_dim)
+
+        prob_enc = self.enc(prob_iids_bundle)
+        in_feat = jnp.concat([users_feat, prob_enc], axis=1)
+        out_feat = self.mlp(in_feat, prob_iids)
+        return out_feat
