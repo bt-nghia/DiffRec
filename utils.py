@@ -8,7 +8,7 @@ import scipy.sparse as sp
 from jax.experimental import sparse
 
 
-TOTAL_TIMESTEPS = conf["timesteps"]
+TOTAL_TIMESTEP = conf["timestep"]
 
 
 def get_pairs(file_path):
@@ -129,6 +129,7 @@ class TestData():
     def __init__(self, conf, task="test"):
         super().__init__()
         self.conf = conf
+        self.task = task
         self.num_user = self.conf["n_user"]
         self.num_item = self.conf["n_item"]
         self.num_bundle = self.conf["n_bundle"]
