@@ -85,36 +85,41 @@ class DiffusionScheduler:
     '''
     replicate & simplified code from diffusers.DDPMScheduler
     '''
+
     def __init__(
             self,
-            num_train_timesteps=TOTAL_TIMESTEPS,
-            beta_start=0,
-            beta_end=1
+            num_train_timestep=100,
+            beta_start=1e-5,
+            beta_end=0.2,
     ):
         super().__init__()
-        self.betas = jnp.linspace(beta_start, beta_end, num_train_timesteps)
+        self.betas = jnp.linspace(beta_start, beta_end, num_train_timestep)
+        self.sqrt_one_minus_betas = jnp.sqrt(1 - self.betas)
         self.alphas = 1 - self.betas
-        self.alphas_cumprod = jnp.cumprod(self.alphas, axis=0)
-        self.timesteps = jnp.arange(0, num_train_timesteps)[::-1] + 1
+        self.alphas_cum_prod = jnp.cumprod(self.alphas, axis=0)
+        self.sqrt_one_minus_alphas_cum_prod = jnp.sqrt(1 - self.alphas_cum_prod)
+        self.sqrt_alphas_cum_prod = jnp.sqrt(self.alphas_cum_prod)
+        self.timestep = jnp.arange(0, num_train_timestep)[::-1] + 1
 
     def add_noise(
             self,
-            original_samples,
-            noise,
-            timesteps,
+            x_t_1,
+            epsilon,
+            t
     ):
-        noisy_input = original_samples * (1-self.betas[timesteps].reshape(-1, 1)) \
-            + noise * self.betas[timesteps].reshape(-1, 1)
-        return noisy_input
+        x_t = (x_t_1 * self.sqrt_alphas_cum_prod[t].reshape(-1, 1) +
+               epsilon * self.sqrt_one_minus_alphas_cum_prod[t].reshape(-1, 1))
+        return x_t
 
-    def step(
+    def polyak_update(
             self,
-            model_output,
-            time_step,
-            post_output,      
+            x_t,
+            x_t_1,
+            t,
     ):
-        prev_pred = post_output * (1-1/time_step) + model_output * (1/time_step)
-        return prev_pred
+        x_t_1_out = x_t_1 * (1 / t) + x_t * (1 - 1 / t)
+        return x_t_1_out
+
 
 
 '''

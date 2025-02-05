@@ -130,7 +130,7 @@ def inference(model, state, test_dataloader, noise_scheduler, key, n_item):
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timesteps):
             model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
-            post_prob_iids_bundle = noise_scheduler.step(model_output, t, post_prob_iids_bundle)
+            post_prob_iids_bundle = noise_scheduler.polyak_update(model_output, t, post_prob_iids_bundle)
 
         all_genbundles.append(post_prob_iids_bundle)
     all_genbundles = np.concatenate(all_genbundles, axis=0)
