@@ -237,7 +237,7 @@ def main():
     """
     Construct Training/Validating/Testing Data
     """
-    train_data = TrainDataVer4(conf)
+    train_data = TrainDataVer2Meal(conf)
     test_data = TestData(conf, "test")
     valid_data = TestData(conf, "tune")
     """
