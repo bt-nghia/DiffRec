@@ -100,6 +100,9 @@ class DiffusionScheduler:
         self.sqrt_one_minus_alphas_cum_prod = jnp.sqrt(1 - self.alphas_cum_prod)
         self.sqrt_alphas_cum_prod = jnp.sqrt(self.alphas_cum_prod)
         self.timestep = jnp.arange(0, num_train_timestep)[::-1] + 1
+        print(self.sqrt_alphas_cum_prod)
+        print(self.sqrt_one_minus_alphas_cum_prod)
+        exit()
 
     def add_noise(
             self,
