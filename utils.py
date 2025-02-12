@@ -232,7 +232,7 @@ class TrainDataVer2(Dataset):
 
     def __getitem__(self, index):
         uid, bid = self.ub_pairs[index]
-        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        prob_iids = np.array(self.ubi_graph[uid].todense()).reshape(-1)
         prob_iids_bundle = np.array(self.bi_graph[bid].todense(), dtype=int).reshape(-1)
         return uid, prob_iids, prob_iids_bundle
 
@@ -271,7 +271,7 @@ class TrainDataVer3(Dataset):
 
     def __getitem__(self, index):
         uid, bid = self.ub_pairs[index]
-        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        prob_iids = np.array(self.ubi_graph[uid].todense()).reshape(-1)
         prob_iids_bundle = np.array(self.bi_graph[bid].todense(), dtype=int).reshape(-1)
         while True:
             nbid = np.random.choice(self.num_bundle)
@@ -316,7 +316,7 @@ class TrainDataVer4(Dataset):
 
     def __getitem__(self, index):
         uid, bid = self.ub_pairs[index]
-        prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
+        prob_iids = np.array(self.ubi_graph[uid].todense()).reshape(-1)
         if self.u_have_strict[uid]:
             while True:
                 nbid = np.random.choice(self.num_bundle)
