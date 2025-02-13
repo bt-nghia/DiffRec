@@ -12,7 +12,8 @@ from utils import *
 from utils import DiffusionScheduler
 
 TOTAL_TIMESTEP = conf["timestep"]
-INF = 1e8
+INF = 1e10
+EPSILON = 1e-10
 
 
 def get_args():
@@ -72,6 +73,7 @@ def cal_metrics(
 
 def kl_divergence(src, trg):
     kl_div = trg * (jnp.log(trg) - jnp.log(src))
+    # kl_div = trg * (jnp.log((trg+EPSILON) / (src + EPSILON)))
     return jnp.sum(kl_div)
 
 
@@ -132,10 +134,10 @@ def train(
             timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
             noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
-            # state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
-            #                                                            prob_iids_bundle)
-            state, loss, aux_dict = train_step(state, uids, prob_iids, noisy_prob_iids_bundle,
-                                                                       prob_iids_bundle) # debug
+            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
+                                                                       prob_iids_bundle)
+            # state, loss, aux_dict = train_step(state, uids, prob_iids, noisy_prob_iids_bundle,
+            #                                                            prob_iids_bundle) # debug
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -282,7 +284,7 @@ def main():
     """
     Training & Save checkpoint
     """
-    # state = train(state, dataloader, noise_scheduler, conf["epoch"] // 2, device, rng_gen)
+    state = train(state, dataloader, noise_scheduler, conf["epoch"] // 2, device, rng_gen)
     state = train(state, dataloader2, noise_scheduler, conf["epoch"] // 2, device, rng_gen2)
     """
     Generate & Evaluate
