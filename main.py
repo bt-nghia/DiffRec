@@ -96,10 +96,9 @@ def train_step(
         logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle)
         mse_loss = mse(logits, prob_iids_bundle)  # MSE
 
-        slogits = nn.softmax(logits)
-        sprob_iids = nn.softmax(prob_iids)
+        slogits = nn.softmax(logits, axis=1)
+        sprob_iids = nn.softmax(prob_iids, axis=1)
         kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
-
         loss = mse_loss + kl_loss
         return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
 
@@ -133,8 +132,10 @@ def train(
             timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
             noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
-            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
-                                                                       prob_iids_bundle)
+            # state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
+            #                                                            prob_iids_bundle)
+            state, loss, aux_dict = train_step(state, uids, prob_iids, noisy_prob_iids_bundle,
+                                                                       prob_iids_bundle) # debug
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -281,7 +282,7 @@ def main():
     """
     Training & Save checkpoint
     """
-    state = train(state, dataloader, noise_scheduler, conf["epoch"] // 2, device, rng_gen)
+    # state = train(state, dataloader, noise_scheduler, conf["epoch"] // 2, device, rng_gen)
     state = train(state, dataloader2, noise_scheduler, conf["epoch"] // 2, device, rng_gen2)
     """
     Generate & Evaluate
