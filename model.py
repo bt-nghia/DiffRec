@@ -144,30 +144,30 @@ class Net(nn.Module):
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
 
-        self.ui_propagate_graph = self.get_propagate_graph()
+    #     self.ui_propagate_graph = self.get_propagate_graph()
 
-    def get_propagate_graph(self):
-        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
-                                      [self.ui_graph.T,
-                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
-        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
-        return ui_propagate_graph
+    # def get_propagate_graph(self):
+    #     ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
+    #                                   [self.ui_graph.T,
+    #                                    sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
+    #     ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
+    #     return ui_propagate_graph
 
-    def propagate(
-            self,
-            num_layers=2
-    ):
-        features = jnp.concatenate([self.user_emb, self.item_emb], axis=0)
-        all_features = [features]
-        for i in range(0, num_layers):
-            features = self.ui_propagate_graph @ features
-            features = features / (i + 2)
-            features = normalize(features)
-            all_features.append(features)
-        all_features = jnp.stack(all_features, axis=1)
-        all_features = jnp.mean(all_features, axis=1)
-        u_feat, i_feat = jnp.split(all_features, [self.n_users], axis=0)
-        return u_feat, i_feat
+    # def propagate(
+    #         self,
+    #         num_layers=2
+    # ):
+    #     features = jnp.concatenate([self.user_emb, self.item_emb], axis=0)
+    #     all_features = [features]
+    #     for i in range(0, num_layers):
+    #         features = self.ui_propagate_graph @ features
+    #         features = features / (i + 2)
+    #         features = normalize(features)
+    #         all_features.append(features)
+    #     all_features = jnp.stack(all_features, axis=1)
+    #     all_features = jnp.mean(all_features, axis=1)
+    #     u_feat, i_feat = jnp.split(all_features, [self.n_users], axis=0)
+    #     return u_feat, i_feat
 
     def __call__(
             self,
@@ -180,8 +180,8 @@ class Net(nn.Module):
         prob_iids: user's item probability
         prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
         """
-        u_feat, i_feat = self.propagate()
-        users_feat = u_feat[uids]
+        # u_feat, i_feat = self.propagate()
+        users_feat = self.user_emb[uids]
 
         users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
         for l in self.encoder:
