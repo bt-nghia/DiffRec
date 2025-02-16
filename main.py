@@ -234,7 +234,7 @@ def main():
     Construct Training/Validating/Testing Data
     """
     train_data = TrainDataVer2(conf)
-    train_data2 = TrainDataVer4(conf)
+    # train_data2 = TrainDataVer4(conf)
     test_data = TestData(conf, "test")
     # valid_data = TestData(conf, "tune")
     """
@@ -247,7 +247,7 @@ def main():
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
-    print(f"DATACLASS: {train_data.__class__.__name__}, {train_data2.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
+    print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
     params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
@@ -263,10 +263,10 @@ def main():
                             shuffle=True,
                             drop_last=True)
 
-    dataloader2 = DataLoader(train_data2,
-                             batch_size=conf["batch_size"],
-                             shuffle=True,
-                             drop_last=True)
+    # dataloader2 = DataLoader(train_data2,
+    #                          batch_size=conf["batch_size"],
+    #                          shuffle=True,
+    #                          drop_last=True)
 
     test_dataloader = DataLoader(test_data,
                                  batch_size=conf["batch_size"],
