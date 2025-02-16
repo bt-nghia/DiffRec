@@ -82,9 +82,9 @@ class MultiHeadAttention(nn.Module):
         k = k.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
         v = v.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
 
-        out, attn = scaled_dot_product(q, k, v)
-        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim)
-        out = x + self.o_proj(out)
+        out, attn = scaled_dot_product(q, k, v) # [bs, n_head, seq_len, n_dim]
+        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim) # [bs, seq_len, n_head * n_dim]
+        out = x + self.o_proj(out) # [bs, seq_len, n_dim]
         out = self.layer_norm(out)
         return out
 
