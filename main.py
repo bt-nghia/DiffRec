@@ -234,9 +234,8 @@ def main():
     Construct Training/Validating/Testing Data
     """
     train_data = TrainDataVer2(conf)
-    # train_data2 = TrainDataVer4(conf)
     test_data = TestData(conf, "test")
-    # valid_data = TestData(conf, "tune")
+    valid_data = TestData(conf, "tune")
     """
     Main Model & Optimizer, Train State
     """
@@ -262,11 +261,6 @@ def main():
                             batch_size=conf["batch_size"],
                             shuffle=True,
                             drop_last=True)
-
-    # dataloader2 = DataLoader(train_data2,
-    #                          batch_size=conf["batch_size"],
-    #                          shuffle=True,
-    #                          drop_last=True)
 
     test_dataloader = DataLoader(test_data,
                                  batch_size=conf["batch_size"],
