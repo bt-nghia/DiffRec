@@ -138,6 +138,14 @@ class Net(nn.Module):
         self.item_emb = self.param("item_emb",
                                    nn.initializers.xavier_uniform(),
                                    (self.n_items, self.hidden_dim))
+        self.bundle_emb = self.param("bundle_emb",
+                                     nn.initializers.xavier_uniform(),
+                                     (self.n_bundles, self.hidden_dim))
+
+        self.enc_u = nn.Dense(self.hidden_dim,
+                              kernel_init=nn.initializers.xavier_uniform(),
+                              bias_init=nn.initializers.zeros)
+
         self.encoder = [EncoderLayer(self.conf) for _ in range(self.conf["n_layer"])]
         self.mlp = PredLayer(self.conf)
         self.enc = nn.Dense(self.hidden_dim,
@@ -173,7 +181,9 @@ class Net(nn.Module):
             self,
             uids,
             prob_iids,
-            prob_iids_bundle
+            prob_iids_bundle,
+            pos_bids,
+            neg_bids,
     ):
         """
         uids: user ids
@@ -190,5 +200,36 @@ class Net(nn.Module):
 
         prob_enc = self.enc(prob_iids_bundle)
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
-        out_feat = self.mlp(in_feat, prob_iids)
-        return out_feat
+        score_distri = self.mlp(in_feat, prob_iids)
+        u_out_feat = self.enc_u(in_feat)
+        # score_distri = u_out_feat @ self.bundle_emb.T #[bs, hidden_dim] X [hidden_dim, n_bundle]
+        pos_score_latent = jnp.sum(u_out_feat * self.bundle_emb[pos_bids], axis=1) #[bs, ]
+        neg_score_latent = jnp.sum(u_out_feat * self.bundle_emb[neg_bids], axis=1) #[bs, ]
+        return score_distri, pos_score_latent, neg_score_latent
+
+    def infer(
+            self,
+            uids,
+            prob_iids,
+            prob_iids_bundle,
+    ):
+        """
+        uids: user ids
+        prob_iids: user's item probability
+        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
+        """
+        u_feat, i_feat = self.propagate()
+        users_feat = u_feat[uids]
+
+        users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        for l in self.encoder:
+            users_feat = l(users_feat)
+        users_feat = users_feat.reshape(-1, self.hidden_dim)
+
+        prob_enc = self.enc(prob_iids_bundle)
+        in_feat = jnp.concat([users_feat, prob_enc], axis=1)
+        score_distri = self.mlp(in_feat, prob_iids)
+        u_out_feat = self.enc_u(in_feat)
+        score_latent = u_out_feat[uids] @ self.bundle_emb.T
+        return score_distri, score_latent
+

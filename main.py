@@ -25,6 +25,7 @@ def get_args():
 
 
 def cal_metrics(
+        latent_score,
         all_gen_buns_batch,
         ub_mask_graph_batch,
         ub_mat, bi_mat,
@@ -79,29 +80,42 @@ def mse(x, y):
     return jnp.mean((x - y) ** 2)
 
 
+def bpr(pos_score, neg_score):
+    bpr_loss = -jnp.log(nn.sigmoid(pos_score - neg_score))
+    bpr_loss = bpr_loss.mean()
+    return bpr_loss
+
+
 def train_step(
         state,
         uids,
         prob_iids,
         noisy_prob_iids_bundle,
-        prob_iids_bundle
+        prob_iids_bundle,
+        pbid,
+        nbid,
 ):
     def loss_fn(
             params,
             uids,
             prob_iids,
             noisy_prob_iids_bundle,
-            prob_iids_bundle
+            prob_iids_bundle,
+            pbid,
+            nbid,
     ):
-        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle)
+        logits, pos_score, neg_score = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle, pbid, nbid)
+
         mse_loss = mse(logits, prob_iids_bundle)  # MSE
 
         slogits = nn.softmax(logits, axis=1)
         sprob_iids = nn.softmax(prob_iids, axis=1)
         kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
 
-        loss = mse_loss + kl_loss
-        return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
+        bpr_loss = bpr(pos_score, neg_score)
+
+        loss = mse_loss + kl_loss + bpr_loss
+        return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss, "bpr": bpr_loss}
 
     aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids, noisy_prob_iids_bundle,
                                                            prob_iids_bundle)
@@ -122,9 +136,11 @@ def train(
 
     for epoch in range(epochs):
         pbar = tqdm(dataloader)
-        for uids, prob_iids, prob_iids_bundle in pbar:
+        for uids, prob_iids, prob_iids_bundle, pbid, nbid in pbar:
             uids = jnp.array(uids, dtype=jnp.int32)
             prob_iids = jnp.array(prob_iids, dtype=jnp.float32)
+            pbid = jnp.array(pbid, dtype=jnp.int32)
+            nbid = jnp.array(nbid, dtype=jnp.int32)
             prob_iids_bundle = jnp.array(prob_iids_bundle, jnp.float32)
 
             randkey, timekey, key = jax.random.split(key, num=3)
@@ -134,7 +150,7 @@ def train(
 
             noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
-                                                                       prob_iids_bundle)
+                                                                       prob_iids_bundle, pbid, nbid)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -149,28 +165,31 @@ def inference(
         n_item
 ):
     all_genbundles = []
+    all_latent_score = []
     for test_data in test_dataloader:
         key, rand_key = jax.random.split(key)
         uids, prob_iids = test_data
         uids = jnp.array(uids, dtype=jnp.int32)
         prob_iids = jnp.array(prob_iids, jnp.float32)
         noisy_prob_iids_bundle = jax.random.normal(rand_key, shape=(uids.shape[0], n_item))
-        # noisy_prob_iids_bundle = jnp.clip(noisy_prob_iids_bundle, 0)
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
+            model_output, latent_score  = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle, method=model.infer)
             post_prob_iids_bundle = noise_scheduler.step(model_output, t, post_prob_iids_bundle)
 
+        all_latent_score.append(latent_score)
         all_genbundles.append(post_prob_iids_bundle)
     all_genbundles = np.concatenate(all_genbundles, axis=0)
-    return all_genbundles
+    all_latent_score = np.concatenate(all_latent_score)
+    return all_genbundles, all_latent_score
 
 
 def eval(
         conf,
         test_data,
-        all_gen_buns
+        all_gen_buns,
+        latent_score,
 ):
     batch_size = conf["batch_size"]
     ui_mat = test_data.ui_graph
@@ -194,6 +213,7 @@ def eval(
             uids_test_batch = uids_test[start:end + 1]
             ub_mask_graph_batch = ub_mask_graph[uids_test_batch]
             all_gen_buns_batch = all_gen_buns[start:end + 1]
+            latent_score = latent_score
 
             r_cnt, p_cnt, n_cnt = cal_metrics(all_gen_buns_batch,
                                               ub_mask_graph_batch,
@@ -233,7 +253,7 @@ def main():
     """
     Construct Training/Validating/Testing Data
     """
-    train_data = TrainDataVer2(conf)
+    train_data = TrainDataVer5(conf)
     test_data = TestData(conf, "test")
     valid_data = TestData(conf, "tune")
     """
@@ -247,7 +267,7 @@ def main():
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
-    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
+    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle, sample_uids, sample_uids)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
@@ -288,8 +308,8 @@ def main():
     # eval(conf, valid_data, generated_bundles_valid)
 
     print("TESTING")
-    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
-    eval(conf, test_data, generated_bundles_test)
+    generated_bundles_test, latent_score = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
+    eval(conf, test_data, generated_bundles_test, latent_score)
 
 
 if __name__ == "__main__":
