@@ -191,4 +191,5 @@ class Net(nn.Module):
         prob_enc = self.enc(prob_iids_bundle)
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
         out_feat = self.mlp(in_feat, prob_iids)
-        return out_feat
+        # return out_feat
+        return prob_iids
