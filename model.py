@@ -236,7 +236,7 @@ class CrossCBR(nn.Module):
             features = features / (i + 2)
             all_features.append(normalize(features, p=2, dim=1))
         all_features = jnp.stack(all_features, 1)
-        all_features = jnp.sum(all_features, dim=1).squeeze(1)
+        all_features = jnp.sum(all_features, axis=1).squeeze(1)
         A_feature, B_feature = jnp.split(all_features, (A_feature.shape[0], B_feature.shape[0]), 0)
         return A_feature, B_feature
 
