@@ -1,3 +1,4 @@
+import jax.experimental.sparse
 import jax.numpy as jnp
 import numpy as np
 import scipy.sparse as sp
@@ -82,9 +83,9 @@ class MultiHeadAttention(nn.Module):
         k = k.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
         v = v.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
 
-        out, attn = scaled_dot_product(q, k, v) # [bs, n_head, seq_len, n_dim]
-        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim) # [bs, seq_len, n_head * n_dim]
-        out = x + self.o_proj(out) # [bs, seq_len, n_dim]
+        out, attn = scaled_dot_product(q, k, v)  # [bs, n_head, seq_len, n_dim]
+        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim)  # [bs, seq_len, n_head * n_dim]
+        out = x + self.o_proj(out)  # [bs, seq_len, n_dim]
         out = self.layer_norm(out)
         return out
 
@@ -192,3 +193,73 @@ class Net(nn.Module):
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
         out_feat = self.mlp(in_feat, prob_iids)
         return out_feat
+
+
+class CrossCBR(nn.Module):
+    conf: dict
+    ui_graph: sp.coo_matrix
+    ub_graph: sp.coo_matrix
+    bi_graph: sp.coo_matrix
+
+    def setup(self):
+        self.num_users = self.conf["n_user"]
+        self.num_bundles = self.conf["n_bundle"]
+        self.num_items = self.conf["n_item"]
+        self.embedding_size = self.conf["n_dim"]
+        self.users_feature = self.param("users_feature", nn.initializers.xavier_normal(),
+                                        (self.num_users, self.embedding_size))
+        self.items_feature = self.param("items_feature", nn.initializers.xavier_normal(),
+                                        (self.num_items, self.embedding_size))
+        self.bundles_feature = self.param("bundles_feature", nn.initializers.xavier_normal(),
+                                          (self.num_bundles, self.embedding_size))
+        self.construct_graph_kernel()
+
+    def construct_graph_kernel(self):
+        ui_graph = self.ui_graph
+        ub_graph = self.ub_graph
+        item_level_graph = sp.bmat([[sp.csr_matrix((ui_graph.shape[0], ui_graph.shape[0])), ui_graph],
+                                    [ui_graph.T, sp.csr_matrix((ui_graph.shape[1], ui_graph.shape[1]))]])
+        self.item_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(item_level_graph)
+        bundle_level_graph = sp.bmat([[sp.csr_matrix((ub_graph.shape[0], ub_graph.shape[0])), ub_graph],
+                                      [ub_graph.T, sp.csr_matrix((ub_graph.shape[1], ub_graph.shape[1]))]])
+        self.bundle_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bundle_level_graph)
+        bi_graph = self.bi_graph
+        bundle_size = bi_graph.sum(axis=1) + 1e-8
+        bi_graph = sp.diags(1 / bundle_size.A.ravel()) @ bi_graph
+        self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_graph)
+
+    def one_propagate(self, graph, A_feature, B_feature):
+        features = jnp.concat((A_feature, B_feature), 0)
+        all_features = [features]
+        for i in range(self.num_layers):
+            features = graph @ features
+            features = features / (i + 2)
+            all_features.append(normalize(features, p=2, dim=1))
+        all_features = jnp.stack(all_features, 1)
+        all_features = jnp.sum(all_features, dim=1).squeeze(1)
+        A_feature, B_feature = jnp.split(all_features, (A_feature.shape[0], B_feature.shape[0]), 0)
+        return A_feature, B_feature
+
+    def get_IL_bundle_rep(self, IL_items_feature):
+        IL_bundles_feature = self.bundle_agg_graph @ IL_items_feature
+        return IL_bundles_feature
+
+    def propagate(self):
+        IL_users_feature, IL_items_feature = self.one_propagate(self.item_level_graph, self.users_feature,
+                                                                self.items_feature)
+        IL_bundles_feature = self.get_IL_bundle_rep(IL_items_feature)
+        BL_users_feature, BL_bundles_feature = self.one_propagate(self.bundle_level_graph, self.users_feature,
+                                                                  self.bundles_feature)
+        users_feature = [IL_users_feature, BL_users_feature]
+        bundles_feature = [IL_bundles_feature, BL_bundles_feature]
+
+        return users_feature, bundles_feature
+
+    def forward(self, batch, ED_drop=False):
+        users, bundles = batch
+        users_feature, bundles_feature = self.propagate()
+
+        users_embedding = [i[users] for i in users_feature]
+        bundles_embedding = [i[bundles] for i in bundles_feature]
+        return users_embedding, bundles_embedding
+
