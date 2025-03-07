@@ -202,6 +202,7 @@ class CrossCBR(nn.Module):
     bi_graph: sp.coo_matrix
 
     def setup(self):
+        self.num_layers = 1
         self.num_users = self.conf["n_user"]
         self.num_bundles = self.conf["n_bundle"]
         self.num_items = self.conf["n_item"]
@@ -229,15 +230,15 @@ class CrossCBR(nn.Module):
         self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_graph)
 
     def one_propagate(self, graph, A_feature, B_feature):
-        features = jnp.concat((A_feature, B_feature), 0)
+        features = jnp.concat((A_feature, B_feature), axis=0)
         all_features = [features]
         for i in range(self.num_layers):
             features = graph @ features
             features = features / (i + 2)
             all_features.append(normalize(features, p=2, dim=1))
         all_features = jnp.stack(all_features, 1)
-        all_features = jnp.sum(all_features, axis=1).squeeze(1)
-        A_feature, B_feature = jnp.split(all_features, (A_feature.shape[0], B_feature.shape[0]), 0)
+        all_features = jnp.sum(all_features, axis=1)
+        A_feature, B_feature = jnp.split(all_features, [A_feature.shape[0]], 0)
         return A_feature, B_feature
 
     def get_IL_bundle_rep(self, IL_items_feature):
@@ -255,11 +256,21 @@ class CrossCBR(nn.Module):
 
         return users_feature, bundles_feature
 
-    def forward(self, batch, ED_drop=False):
-        users, bundles = batch
-        users_feature, bundles_feature = self.propagate()
+    def __call__(self, uids, pbids, nbids):
+        users_feat, bundles_feat = self.propagate()
 
-        users_embedding = [i[users] for i in users_feature]
-        bundles_embedding = [i[bundles] for i in bundles_feature]
-        return users_embedding, bundles_embedding
+        pos_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][pbids], axis=1)
+        neg_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][nbids], axis=1)
+
+        pos_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][pbids], axis=1)
+        neg_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][nbids], axis=1)
+        return pos_score, neg_score
+
+    def eval(self, users):
+        users_feature, bundles_feature = self.propagate()
+        users_feature_atom, users_feature_non_atom = [i[users] for i in users_feature]
+        bundles_feature_atom, bundles_feature_non_atom = bundles_feature
+
+        scores = users_feature_atom @ bundles_feature_atom.T + users_feature_non_atom @ bundles_feature_non_atom.T
+        return scores
 

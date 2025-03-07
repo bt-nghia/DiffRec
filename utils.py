@@ -190,7 +190,11 @@ class TrainDataVer2(Dataset):
         uid, bid = self.ub_pairs[index]
         prob_iids = np.array(self.ui_graph[uid].todense()).reshape(-1)
         prob_iids_bundle = np.array(self.bi_graph[bid].todense(), dtype=int).reshape(-1)
-        return uid, prob_iids, prob_iids_bundle
+        while 1:
+            nbid = np.random.choice(self.num_bundle)
+            if self.ub_graph[uid, nbid] == 0:
+                break
+        return uid, bid, nbid, prob_iids, prob_iids_bundle
 
     def __len__(self):
         return len(self.ub_pairs)
