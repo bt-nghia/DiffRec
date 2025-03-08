@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import numpy as np
 import scipy.sparse as sp
 from flax import linen as nn
-from jax.experimental import sparse
 
 INF = 1e8
 
@@ -135,19 +134,12 @@ class Merge(nn.Module):
         self.n_bundles = self.conf["n_bundle"]
         self.hidden_dim = self.conf["n_dim"]
         self.n_aspect = self.conf["n_aspect"]
-        self.user_emb = self.param("user_emb",
-                                   nn.initializers.xavier_uniform(),
-                                   (self.n_users, self.hidden_dim))
-        self.item_emb = self.param("item_emb",
-                                   nn.initializers.xavier_uniform(),
-                                   (self.n_items, self.hidden_dim))
+        self.num_layers = 1
         self.encoder = [EncoderLayer(self.conf) for _ in range(self.conf["n_layer"])]
         self.mlp = PredLayer(self.conf)
         self.enc = nn.Dense(self.hidden_dim,
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
-
-        self.num_layers = 1
         self.users_feature = self.param("users_feature", nn.initializers.xavier_normal(),
                                         (self.n_users, self.hidden_dim))
         self.items_feature = self.param("items_feature", nn.initializers.xavier_normal(),
@@ -194,7 +186,6 @@ class Merge(nn.Module):
                                                                   self.bundles_feature)
         users_feature = [IL_users_feature, BL_users_feature]
         bundles_feature = [IL_bundles_feature, BL_bundles_feature]
-
         return users_feature, bundles_feature
 
     def __call__(
@@ -223,9 +214,6 @@ class Merge(nn.Module):
         in_feat = jnp.concat([users_feat0, prob_enc], axis=1)
         out_distri = self.mlp(in_feat, prob_iids)
 
-        # latent
-        # users_feat, bundles_feat = self.propagate()
-
         pos_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][pbids], axis=1)
         neg_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][nbids], axis=1)
 
@@ -239,11 +227,6 @@ class Merge(nn.Module):
             prob_iids,
             prob_iids_bundle
     ):
-        """
-        uids: user ids
-        prob_iids: user's item probability
-        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
-        """
         users_feat, bundles_feat = self.propagate()
         users_feat0 = users_feat[0][uids]
 

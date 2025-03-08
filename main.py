@@ -37,7 +37,7 @@ def cal_metrics(
 
     # score = pred_score + ub_mask_graph_batch * -INF
     # score = ranking_score + ub_mask_graph_batch * -INF
-    score = ranking_score + pred_score + ub_mask_graph_batch * -INF
+    score = nn.sigmoid(ranking_score) + nn.sigmoid(pred_score) + ub_mask_graph_batch * -INF #norm by sigmoid
     bs = score.shape[0]
     _, col_ids = jax.lax.top_k(score, k=topk)
     row_ids = jnp.broadcast_to(jnp.arange(0, bs).reshape(-1, 1), (bs, topk))
@@ -153,14 +153,14 @@ def train(
 
             randkey, timekey, key = jax.random.split(key, num=3)
             noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
-            # noise = jnp.clip(noise, 0)
+            noise = jnp.clip(noise, 0, 1)
             timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
             noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, pbids, nbids, prob_iids,
                                                                        noisy_prob_iids_bundle,
                                                                        prob_iids_bundle)
-            pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f | BPR: %.4f |" % (
+            pbar.set_description("EPOCH: %i | LOSS: %.4f | KL: %.4f | MSE: %.4f | BPR: %.4f |" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"], aux_dict["bpr"]))
     return state
 
@@ -180,7 +180,7 @@ def inference(
         uids = jnp.array(uids, dtype=jnp.int32)
         prob_iids = jnp.array(prob_iids, jnp.float32)
         noisy_prob_iids_bundle = jax.random.normal(rand_key, shape=(uids.shape[0], n_item))
-        # noisy_prob_iids_bundle = jnp.clip(noisy_prob_iids_bundle, 0)
+        noisy_prob_iids_bundle = jnp.clip(noisy_prob_iids_bundle, 0, 1)
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
