@@ -7,7 +7,7 @@ from flax.training import train_state
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from model import Net, CrossCBR
+from model import Merge
 from utils import *
 from utils import DiffusionScheduler
 
@@ -32,11 +32,12 @@ def cal_metrics(
         topk
 ):
     recall_cnt, pre_cnt, ndcg_cnt, cnt = 0, 0, 0, 0
-    # pred_score = all_gen_buns_batch @ bi_mat.T
+    pred_score = all_gen_buns_batch @ bi_mat.T
     ub_mask_graph_batch = ub_mask_graph_batch.todense()
 
     # score = pred_score + ub_mask_graph_batch * -INF
-    score = ranking_score + ub_mask_graph_batch * -INF
+    # score = ranking_score + ub_mask_graph_batch * -INF
+    score = ranking_score + pred_score + ub_mask_graph_batch * -INF
     bs = score.shape[0]
     _, col_ids = jax.lax.top_k(score, k=topk)
     row_ids = jnp.broadcast_to(jnp.arange(0, bs).reshape(-1, 1), (bs, topk))
@@ -110,12 +111,17 @@ def train_step(
         # sprob_iids = nn.softmax(prob_iids, axis=1)
         # kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
 
-        pos_score, neg_score = state.apply_fn(params, uids, pbids, nbids)
-        loss = bpr(pos_score, neg_score)
-        # loss = mse_loss + kl_loss
-        mse_loss = 0
-        kl_loss = 0
-        return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
+        logits, pos_score, neg_score = state.apply_fn(params, uids, pbids, nbids, prob_iids, noisy_prob_iids_bundle)
+
+        bpr_loss = bpr(pos_score, neg_score)
+        mse_loss = mse(logits, prob_iids_bundle)
+
+        slogits = nn.softmax(logits, axis=1)
+        sprob_iids = nn.softmax(prob_iids, axis=1)
+        kld_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
+
+        loss = mse_loss + kld_loss + bpr_loss
+        return loss, {"loss": loss, "mse": mse_loss, "kl": kld_loss, "bpr": bpr_loss}
 
     aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, pbids, nbids, prob_iids,
                                                            noisy_prob_iids_bundle,
@@ -154,8 +160,8 @@ def train(
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, pbids, nbids, prob_iids,
                                                                        noisy_prob_iids_bundle,
                                                                        prob_iids_bundle)
-            pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
-                epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
+            pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f | BPR: %.4f |" % (
+                epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"], aux_dict["bpr"]))
     return state
 
 
@@ -178,7 +184,7 @@ def inference(
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
+            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle, method=model.infer)
             post_prob_iids_bundle = noise_scheduler.step(model_output, t, post_prob_iids_bundle)
 
         all_genbundles.append(post_prob_iids_bundle)
@@ -214,8 +220,8 @@ def eval(
 
             uids_test_batch = uids_test[start:end + 1]
             ub_mask_graph_batch = ub_mask_graph[uids_test_batch]
-            # all_gen_buns_batch = all_gen_buns[start:end + 1]
-            all_gen_buns_batch = None
+            all_gen_buns_batch = all_gen_buns[start:end + 1]
+
             ranking_score = model.apply(state.params, uids_test_batch, method=model.eval)
 
             r_cnt, p_cnt, n_cnt = cal_metrics(all_gen_buns_batch,
@@ -268,13 +274,14 @@ def main():
     sample_prob_iids = jnp.empty((1, conf["n_item"]))
     sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
     # model = Net(conf, train_data.ui_graph)
-    model = CrossCBR(conf, ui_graph=train_data.ui_graph, ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
+    # model = CrossCBR(conf, ui_graph=train_data.ui_graph, ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
+    model = Merge(conf, ui_graph=train_data.ui_graph, ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
     # params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
-    params = model.init(rng_model, sample_uids, sample_uids, sample_uids)
+    params = model.init(rng_model, sample_uids, sample_uids, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
@@ -315,8 +322,8 @@ def main():
     # eval(conf, valid_data, generated_bundles_valid)
 
     print("TESTING")
-    # generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
-    generated_bundles_test = None
+    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
+    # generated_bundles_test = None
     eval(conf, test_data, generated_bundles_test, model, state)
 
 

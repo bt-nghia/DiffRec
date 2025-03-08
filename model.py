@@ -123,9 +123,11 @@ class PredLayer(nn.Module):
         return logits
 
 
-class Net(nn.Module):
+class Merge(nn.Module):
     conf: dict
     ui_graph: sp.coo_matrix
+    ub_graph: sp.coo_matrix
+    bi_graph: sp.coo_matrix
 
     def setup(self):
         self.n_users = self.conf["n_user"]
@@ -145,74 +147,13 @@ class Net(nn.Module):
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
 
-        self.ui_propagate_graph = self.get_propagate_graph()
-
-    def get_propagate_graph(self):
-        ui_propagate_graph = sp.bmat([[sp.coo_matrix((self.ui_graph.shape[0], self.ui_graph.shape[0])), self.ui_graph],
-                                      [self.ui_graph.T,
-                                       sp.coo_matrix((self.ui_graph.shape[1], self.ui_graph.shape[1]))]])
-        ui_propagate_graph = sparse.BCOO.from_scipy_sparse(laplace_norm(ui_propagate_graph))
-        return ui_propagate_graph
-
-    def propagate(
-            self,
-            num_layers=2
-    ):
-        features = jnp.concatenate([self.user_emb, self.item_emb], axis=0)
-        all_features = [features]
-        for i in range(0, num_layers):
-            features = self.ui_propagate_graph @ features
-            features = features / (i + 2)
-            features = normalize(features)
-            all_features.append(features)
-        all_features = jnp.stack(all_features, axis=1)
-        all_features = jnp.mean(all_features, axis=1)
-        u_feat, i_feat = jnp.split(all_features, [self.n_users], axis=0)
-        return u_feat, i_feat
-
-    def __call__(
-            self,
-            uids,
-            prob_iids,
-            prob_iids_bundle
-    ):
-        """
-        uids: user ids
-        prob_iids: user's item probability
-        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
-        """
-        u_feat, i_feat = self.propagate()
-        users_feat = u_feat[uids]
-
-        users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
-        for l in self.encoder:
-            users_feat = l(users_feat)
-        users_feat = users_feat.reshape(-1, self.hidden_dim)
-
-        prob_enc = self.enc(prob_iids_bundle)
-        in_feat = jnp.concat([users_feat, prob_enc], axis=1)
-        out_feat = self.mlp(in_feat, prob_iids)
-        return out_feat
-
-
-class CrossCBR(nn.Module):
-    conf: dict
-    ui_graph: sp.coo_matrix
-    ub_graph: sp.coo_matrix
-    bi_graph: sp.coo_matrix
-
-    def setup(self):
         self.num_layers = 1
-        self.num_users = self.conf["n_user"]
-        self.num_bundles = self.conf["n_bundle"]
-        self.num_items = self.conf["n_item"]
-        self.embedding_size = self.conf["n_dim"]
         self.users_feature = self.param("users_feature", nn.initializers.xavier_normal(),
-                                        (self.num_users, self.embedding_size))
+                                        (self.n_users, self.hidden_dim))
         self.items_feature = self.param("items_feature", nn.initializers.xavier_normal(),
-                                        (self.num_items, self.embedding_size))
+                                        (self.n_items, self.hidden_dim))
         self.bundles_feature = self.param("bundles_feature", nn.initializers.xavier_normal(),
-                                          (self.num_bundles, self.embedding_size))
+                                          (self.n_bundles, self.hidden_dim))
         self.construct_graph_kernel()
 
     def construct_graph_kernel(self):
@@ -256,15 +197,66 @@ class CrossCBR(nn.Module):
 
         return users_feature, bundles_feature
 
-    def __call__(self, uids, pbids, nbids):
+    def __call__(
+            self,
+            uids,
+            pbids,
+            nbids,
+            prob_iids,
+            prob_iids_bundle
+    ):
+        """
+        uids: user ids
+        prob_iids: user's item probability
+        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
+        """
         users_feat, bundles_feat = self.propagate()
+        users_feat0 = users_feat[0][uids]
+
+        users_feat0 = users_feat0.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        for l in self.encoder:
+            users_feat0 = l(users_feat0)
+        users_feat0 = users_feat0.reshape(-1, self.hidden_dim)
+
+        # probabilistic
+        prob_enc = self.enc(prob_iids_bundle)
+        in_feat = jnp.concat([users_feat0, prob_enc], axis=1)
+        out_distri = self.mlp(in_feat, prob_iids)
+
+        # latent
+        # users_feat, bundles_feat = self.propagate()
 
         pos_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][pbids], axis=1)
         neg_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][nbids], axis=1)
 
         pos_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][pbids], axis=1)
         neg_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][nbids], axis=1)
-        return pos_score, neg_score
+        return out_distri, pos_score, neg_score
+
+    def infer(
+            self,
+            uids,
+            prob_iids,
+            prob_iids_bundle
+    ):
+        """
+        uids: user ids
+        prob_iids: user's item probability
+        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
+        """
+        users_feat, bundles_feat = self.propagate()
+        users_feat0 = users_feat[0][uids]
+
+        users_feat0 = users_feat0.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        for l in self.encoder:
+            users_feat0 = l(users_feat0)
+        users_feat0 = users_feat0.reshape(-1, self.hidden_dim)
+
+        # probabilistic
+        prob_enc = self.enc(prob_iids_bundle)
+        in_feat = jnp.concat([users_feat0, prob_enc], axis=1)
+        out_distri = self.mlp(in_feat, prob_iids)
+        return out_distri
 
     def eval(self, users):
         users_feature, bundles_feature = self.propagate()
@@ -273,4 +265,3 @@ class CrossCBR(nn.Module):
 
         scores = users_feature_atom @ bundles_feature_atom.T + users_feature_non_atom @ bundles_feature_non_atom.T
         return scores
-
