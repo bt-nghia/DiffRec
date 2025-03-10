@@ -211,7 +211,8 @@ class Merge(nn.Module):
         """
         users_feat, bundles_feat = self.propagate()
         users_feat_0_uids = users_feat[0][uids]
-        users_feat0 = jax.lax.stop_gradient(users_feat_0_uids)
+        users_feat0 = users_feat_0_uids.copy()
+        users_feat0 = jax.lax.stop_gradient(users_feat0)
 
         users_feat0 = users_feat0.reshape(-1, self.n_aspect,
                                           self.hidden_dim // self.n_aspect)
