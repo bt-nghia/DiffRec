@@ -9,11 +9,11 @@ INF = 1e8
 
 def normalize(x, p=2, dim=1, eps=1e-12):
     """JAX equivalent of torch.nn.functional.normalize
-    
+
     Args:
         x: Input tensor
         p: Power for the normalization (default: 2)
-        dim: Dimension to normalize over (default: 1) 
+        dim: Dimension to normalize over (default: 1)
         eps: Small value to avoid division by zero (default: 1e-12)
     """
     norm = jnp.linalg.norm(x, ord=p, axis=dim, keepdims=True)
@@ -76,14 +76,17 @@ class MultiHeadAttention(nn.Module):
         """
         bs, seq_len, n_dim = x.shape  # [n_dim * n_aspect == hidden_dim]
         qkv = self.qkv_proj(x)  # [bs, seq_len, n_dim * n_head * 3]
-        q, k, v = jnp.array_split(qkv, 3, axis=-1)  # [bs, seq_len, n_head, n_dim]
+        # [bs, seq_len, n_head, n_dim]
+        q, k, v = jnp.array_split(qkv, 3, axis=-1)
 
-        q = q.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)  # [bs, n_head, seq_len, n_dim]
+        q = q.reshape((bs, seq_len, self.n_head, n_dim)).transpose(
+            0, 2, 1, 3)  # [bs, n_head, seq_len, n_dim]
         k = k.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
         v = v.reshape((bs, seq_len, self.n_head, n_dim)).transpose(0, 2, 1, 3)
 
         out, attn = scaled_dot_product(q, k, v)  # [bs, n_head, seq_len, n_dim]
-        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim)  # [bs, seq_len, n_head * n_dim]
+        # [bs, seq_len, n_head * n_dim]
+        out = out.swapaxes(1, 2).reshape(bs, seq_len, self.n_head * n_dim)
         out = x + self.o_proj(out)  # [bs, seq_len, n_dim]
         out = self.layer_norm(out)
         return out
@@ -93,7 +96,8 @@ class EncoderLayer(nn.Module):
     conf: dict
 
     def setup(self):
-        self.attn = MultiHeadAttention(self.conf["n_dim"] // self.conf["n_aspect"], self.conf["n_head"])
+        self.attn = MultiHeadAttention(
+            self.conf["n_dim"] // self.conf["n_aspect"], self.conf["n_head"])
         self.lin_norm = LinNorm(self.conf["n_dim"] // self.conf["n_aspect"])
 
     def __call__(self, x):
@@ -135,7 +139,8 @@ class Merge(nn.Module):
         self.hidden_dim = self.conf["n_dim"]
         self.n_aspect = self.conf["n_aspect"]
         self.num_layers = 1
-        self.encoder = [EncoderLayer(self.conf) for _ in range(self.conf["n_layer"])]
+        self.encoder = [EncoderLayer(self.conf)
+                        for _ in range(self.conf["n_layer"])]
         self.mlp = PredLayer(self.conf)
         self.enc = nn.Dense(self.hidden_dim,
                             kernel_init=nn.initializers.xavier_uniform(),
@@ -153,14 +158,17 @@ class Merge(nn.Module):
         ub_graph = self.ub_graph
         item_level_graph = sp.bmat([[sp.csr_matrix((ui_graph.shape[0], ui_graph.shape[0])), ui_graph],
                                     [ui_graph.T, sp.csr_matrix((ui_graph.shape[1], ui_graph.shape[1]))]])
-        self.item_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(item_level_graph)
+        self.item_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
+            item_level_graph)
         bundle_level_graph = sp.bmat([[sp.csr_matrix((ub_graph.shape[0], ub_graph.shape[0])), ub_graph],
                                       [ub_graph.T, sp.csr_matrix((ub_graph.shape[1], ub_graph.shape[1]))]])
-        self.bundle_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bundle_level_graph)
+        self.bundle_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
+            bundle_level_graph)
         bi_graph = self.bi_graph
         bundle_size = bi_graph.sum(axis=1) + 1e-8
         bi_graph = sp.diags(1 / bundle_size.A.ravel()) @ bi_graph
-        self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_graph)
+        self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
+            bi_graph)
 
     def one_propagate(self, graph, A_feature, B_feature):
         features = jnp.concat((A_feature, B_feature), axis=0)
@@ -202,9 +210,11 @@ class Merge(nn.Module):
         prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
         """
         users_feat, bundles_feat = self.propagate()
-        users_feat0 = users_feat[0][uids]
+        users_feat_0_uids = users_feat[0][uids]
+        users_feat0 = jax.lax.stop_gradient(users_feat_0_uids)
 
-        users_feat0 = users_feat0.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        users_feat0 = users_feat0.reshape(-1, self.n_aspect,
+                                          self.hidden_dim // self.n_aspect)
         for l in self.encoder:
             users_feat0 = l(users_feat0)
         users_feat0 = users_feat0.reshape(-1, self.hidden_dim)
@@ -214,11 +224,15 @@ class Merge(nn.Module):
         in_feat = jnp.concat([users_feat0, prob_enc], axis=1)
         out_distri = self.mlp(in_feat, prob_iids)
 
-        pos_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][pbids], axis=1)
-        neg_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][nbids], axis=1)
+        pos_score = jnp.sum(users_feat[0][uids]
+                            * bundles_feat[0][pbids], axis=1)
+        neg_score = jnp.sum(users_feat[0][uids]
+                            * bundles_feat[0][nbids], axis=1)
 
-        pos_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][pbids], axis=1)
-        neg_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][nbids], axis=1)
+        pos_score += jnp.sum(users_feat[1][uids]
+                             * bundles_feat[1][pbids], axis=1)
+        neg_score += jnp.sum(users_feat[1][uids]
+                             * bundles_feat[1][nbids], axis=1)
         return out_distri, pos_score, neg_score
 
     def infer(
@@ -230,7 +244,8 @@ class Merge(nn.Module):
         users_feat, bundles_feat = self.propagate()
         users_feat0 = users_feat[0][uids]
 
-        users_feat0 = users_feat0.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        users_feat0 = users_feat0.reshape(-1, self.n_aspect,
+                                          self.hidden_dim // self.n_aspect)
         for l in self.encoder:
             users_feat0 = l(users_feat0)
         users_feat0 = users_feat0.reshape(-1, self.hidden_dim)
@@ -243,8 +258,10 @@ class Merge(nn.Module):
 
     def eval(self, users):
         users_feature, bundles_feature = self.propagate()
-        users_feature_atom, users_feature_non_atom = [i[users] for i in users_feature]
+        users_feature_atom, users_feature_non_atom = [
+            i[users] for i in users_feature]
         bundles_feature_atom, bundles_feature_non_atom = bundles_feature
 
-        scores = users_feature_atom @ bundles_feature_atom.T + users_feature_non_atom @ bundles_feature_non_atom.T
+        scores = users_feature_atom @ bundles_feature_atom.T + \
+            users_feature_non_atom @ bundles_feature_non_atom.T
         return scores
