@@ -39,7 +39,8 @@ def cal_metrics(
 
     # score = pred_score + ub_mask_graph_batch * -INF
     # score = ranking_score + ub_mask_graph_batch * -INF
-    score = nn.softmax(ranking_score, axis=1) + nn.softmax(pred_score, axis=1) + ub_mask_graph_batch * -INF #norm by sigmoid
+    score = 0.9 * nn.softmax(ranking_score, axis=1) + 0.1 * nn.softmax(pred_score,
+                                                           axis=1) + ub_mask_graph_batch * -INF  # norm by sigmoid
     bs = score.shape[0]
     _, col_ids = jax.lax.top_k(score, k=topk)
     row_ids = jnp.broadcast_to(jnp.arange(0, bs).reshape(-1, 1), (bs, topk))
@@ -53,7 +54,8 @@ def cal_metrics(
 
     # ndcg
     def DCG(hit, topk):
-        dcg = hit / jnp.broadcast_to(jnp.log2(jnp.arange(2, topk + 2)), hit.shape)
+        dcg = hit / \
+            jnp.broadcast_to(jnp.log2(jnp.arange(2, topk + 2)), hit.shape)
         return dcg.sum(axis=-1)
 
     def IDCG(num_pos, topk):
@@ -67,7 +69,8 @@ def cal_metrics(
         IDCGs[i] = IDCG(i, topk)
 
     IDCGs = np.array(IDCGs)
-    num_pos_clamp = jax.lax.clamp(0, ub_mat.sum(axis=1).astype(jnp.int32), topk).astype(jnp.int32)
+    num_pos_clamp = jax.lax.clamp(0, ub_mat.sum(
+        axis=1).astype(jnp.int32), topk).astype(jnp.int32)
     dcg = DCG(hit, topk).reshape(-1, 1)
     idcg = IDCGs[num_pos_clamp]
     ndcg_cnt = dcg / idcg
@@ -113,14 +116,16 @@ def train_step(
         # sprob_iids = nn.softmax(prob_iids, axis=1)
         # kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
 
-        logits, pos_score, neg_score = state.apply_fn(params, uids, pbids, nbids, prob_iids, noisy_prob_iids_bundle)
+        logits, pos_score, neg_score = state.apply_fn(
+            params, uids, pbids, nbids, prob_iids, noisy_prob_iids_bundle)
 
         bpr_loss = bpr(pos_score, neg_score)
         mse_loss = mse(logits, prob_iids_bundle)
 
         slogits = nn.softmax(logits, axis=1)
         sprob_iids = nn.softmax(prob_iids, axis=1)
-        kld_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
+        # Kullback-Leibler Divergence (true probability: prob_iids)
+        kld_loss = kl_divergence(slogits, sprob_iids)
 
         loss = mse_loss + kld_loss + bpr_loss
         return loss, {"loss": loss, "mse": mse_loss, "kl": kld_loss, "bpr": bpr_loss}
@@ -156,9 +161,11 @@ def train(
             randkey, timekey, key = jax.random.split(key, num=3)
             noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
             noise = jnp.clip(noise, 0, 1)
-            timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
+            timestep = jax.random.randint(
+                timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
-            noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
+            noisy_prob_iids_bundle = noise_scheduler.add_noise(
+                prob_iids_bundle, noise, timestep)
             state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, pbids, nbids, prob_iids,
                                                                        noisy_prob_iids_bundle,
                                                                        prob_iids_bundle)
@@ -181,13 +188,16 @@ def inference(
         uids, prob_iids = test_data
         uids = jnp.array(uids, dtype=jnp.int32)
         prob_iids = jnp.array(prob_iids, jnp.float32)
-        noisy_prob_iids_bundle = jax.random.normal(rand_key, shape=(uids.shape[0], n_item))
+        noisy_prob_iids_bundle = jax.random.normal(
+            rand_key, shape=(uids.shape[0], n_item))
         noisy_prob_iids_bundle = jnp.clip(noisy_prob_iids_bundle, 0, 1)
 
         post_prob_iids_bundle = noisy_prob_iids_bundle
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle, method=model.infer)
-            post_prob_iids_bundle = noise_scheduler.step(model_output, t, post_prob_iids_bundle)
+            model_output = model.apply(
+                state.params, uids, prob_iids, post_prob_iids_bundle, method=model.infer)
+            post_prob_iids_bundle = noise_scheduler.step(
+                model_output, t, post_prob_iids_bundle)
 
         all_genbundles.append(post_prob_iids_bundle)
     all_genbundles = np.concatenate(all_genbundles, axis=0)
@@ -209,7 +219,8 @@ def eval(
 
     uids_test = test_data.test_uid
     batch_idx = np.arange(0, len(uids_test))
-    test_batch_loader = DataLoader(batch_idx, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_batch_loader = DataLoader(
+        batch_idx, batch_size=batch_size, shuffle=False, drop_last=False)
 
     for topk in [10, 20, 40, 50]:
         recall_cnt = 0
@@ -224,7 +235,8 @@ def eval(
             ub_mask_graph_batch = ub_mask_graph[uids_test_batch]
             all_gen_buns_batch = all_gen_buns[start:end + 1]
 
-            ranking_score = model.apply(state.params, uids_test_batch, method=model.eval)
+            ranking_score = model.apply(
+                state.params, uids_test_batch, method=model.eval)
 
             r_cnt, p_cnt, n_cnt = cal_metrics(all_gen_buns_batch,
                                               ranking_score,
@@ -251,7 +263,8 @@ def main():
     dataset_name = args.dataset
     conf["dataset"] = args.dataset
     conf["data_path"] = args.data_path
-    nu, nb, ni = get_size(f"{conf['data_path']}/{dataset_name}/{dataset_name}_data_size.txt")
+    nu, nb, ni = get_size(
+        f"{conf['data_path']}/{dataset_name}/{dataset_name}_data_size.txt")
     conf["n_user"] = nu
     conf["n_item"] = ni
     conf["n_bundle"] = nb
@@ -259,7 +272,8 @@ def main():
     device = devices[args.device_id]
     conf["device"] = device
 
-    rng_infer, rng_gen, rng_gen2, rng_model = jax.random.split(jax.random.PRNGKey(2025), num=4)
+    rng_infer, rng_gen, rng_gen2, rng_model = jax.random.split(
+        jax.random.PRNGKey(2025), num=4)
     np.random.seed(2025)
     print(conf)
 
@@ -277,14 +291,19 @@ def main():
     sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
     # model = Net(conf, train_data.ui_graph)
     # model = CrossCBR(conf, ui_graph=train_data.ui_graph, ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
-    model = Merge(conf, ui_graph=train_data.ui_graph, ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
+    model = Merge(conf, ui_graph=train_data.ui_graph,
+                  ub_graph=train_data.ub_graph, bi_graph=train_data.bi_graph)
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
-    print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
+    print(f"DATACLASS: {train_data.__class__.__name__}, {
+          test_data.__class__.__name__}({test_data.task})")
     # params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
-    params = model.init(rng_model, sample_uids, sample_uids, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
-    param_count = sum(x.size for x in jax.tree.leaves(params))
+    params = model.init(rng_model, sample_uids, sample_uids,
+                        sample_uids, sample_prob_iids, sample_prob_iids_bundle)
+    with open(os.path.join(conf["data_path"], conf["dataset"], "main_model.pkl"), "rb") as f:
+        params = pickle.load(f)
+    param_count = (sum(x.size for x in jax.tree.leaves(params)))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
 
@@ -311,7 +330,8 @@ def main():
     """
     Training & Save checkpoint
     """
-    state = train(state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
+    state = train(state, dataloader, noise_scheduler,
+                  conf["epoch"], device, rng_gen)
     # state = train(state, dataloader2, noise_scheduler, conf["epoch"], device, rng_gen2)
     """
     Generate & Evaluate
@@ -324,13 +344,14 @@ def main():
     # eval(conf, valid_data, generated_bundles_valid)
 
     print("TESTING")
-    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
+    generated_bundles_test = inference(
+        model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
     # generated_bundles_test = None
     eval(conf, test_data, generated_bundles_test, model, state)
 
-    # save all
-    with open(os.path.join(conf["data_path"], conf["dataset"], "main_model.pkl"), "wb") as f:
-        pickle.dump(state.params, f)
+    # # save all
+    # with open(os.path.join(conf["data_path"], conf["dataset"], "main_model.pkl"), "wb") as f:
+    #     pickle.dump(state.params, f)
 
 
 if __name__ == "__main__":
