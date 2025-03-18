@@ -156,6 +156,8 @@ class Merge(nn.Module):
     def construct_graph_kernel(self):
         ui_graph = self.ui_graph
         ub_graph = self.ub_graph
+        bi_graph = self.bi_graph
+
         item_level_graph = sp.bmat([[sp.csr_matrix((ui_graph.shape[0], ui_graph.shape[0])), ui_graph],
                                     [ui_graph.T, sp.csr_matrix((ui_graph.shape[1], ui_graph.shape[1]))]])
         self.item_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
@@ -164,11 +166,17 @@ class Merge(nn.Module):
                                       [ub_graph.T, sp.csr_matrix((ub_graph.shape[1], ub_graph.shape[1]))]])
         self.bundle_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
             bundle_level_graph)
-        bi_graph = self.bi_graph
+        bi_level_graph = sp.bmat([[sp.csr_matrix((bi_graph.shape[0], bi_graph.shape[0])), bi_graph],
+                                  [bi_graph.T, sp.csr_matrix((bi_graph.shape[1], bi_graph.shape[1]))]])
+        self.bi_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_level_graph)
+
         bundle_size = bi_graph.sum(axis=1) + 1e-8
         bi_graph = sp.diags(1 / bundle_size.A.ravel()) @ bi_graph
-        self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(
-            bi_graph)
+        self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_graph)
+
+        user_size = ui_graph.sum(axis=1) + 1e-8
+        ui_graph = sp.diags(1 / user_size.A.ravel()) @ ui_graph
+        self.users_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(ui_graph)
 
     def one_propagate(self, graph, A_feature, B_feature):
         features = jnp.concat((A_feature, B_feature), axis=0)
@@ -186,14 +194,22 @@ class Merge(nn.Module):
         IL_bundles_feature = self.bundle_agg_graph @ IL_items_feature
         return IL_bundles_feature
 
+    def get_BI_user_rep(self, BI_items_feature):
+        BI_users_feature = self.users_agg_graph @ BI_items_feature
+        return BI_users_feature
+
     def propagate(self):
         IL_users_feature, IL_items_feature = self.one_propagate(self.item_level_graph, self.users_feature,
                                                                 self.items_feature)
         IL_bundles_feature = self.get_IL_bundle_rep(IL_items_feature)
         BL_users_feature, BL_bundles_feature = self.one_propagate(self.bundle_level_graph, self.users_feature,
                                                                   self.bundles_feature)
-        users_feature = [IL_users_feature, BL_users_feature]
-        bundles_feature = [IL_bundles_feature, BL_bundles_feature]
+        BI_bundles_feature, BI_items_feature = self.one_propagate(self.bi_level_graph, self.bundles_feature,
+                                                                  self.items_feature)
+        BI_users_feature = self.get_BI_user_rep(BI_items_feature)
+
+        users_feature = [IL_users_feature, BL_users_feature, BI_users_feature]
+        bundles_feature = [IL_bundles_feature, BL_bundles_feature, BI_bundles_feature]
         return users_feature, bundles_feature
 
     def __call__(
@@ -225,15 +241,14 @@ class Merge(nn.Module):
         in_feat = jnp.concat([users_feat0, prob_enc], axis=1)
         out_distri = self.mlp(in_feat, prob_iids)
 
-        pos_score = jnp.sum(users_feat[0][uids]
-                            * bundles_feat[0][pbids], axis=1)
-        neg_score = jnp.sum(users_feat[0][uids]
-                            * bundles_feat[0][nbids], axis=1)
+        pos_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][pbids], axis=1)
+        neg_score = jnp.sum(users_feat[0][uids] * bundles_feat[0][nbids], axis=1)
 
-        pos_score += jnp.sum(users_feat[1][uids]
-                             * bundles_feat[1][pbids], axis=1)
-        neg_score += jnp.sum(users_feat[1][uids]
-                             * bundles_feat[1][nbids], axis=1)
+        pos_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][pbids], axis=1)
+        neg_score += jnp.sum(users_feat[1][uids] * bundles_feat[1][nbids], axis=1)
+
+        pos_score += jnp.sum(users_feat[2][uids] * bundles_feat[2][pbids], axis=1)
+        neg_score += jnp.sum(users_feat[2][uids] * bundles_feat[2][nbids], axis=1)
         return out_distri, pos_score, neg_score
 
     def infer(
@@ -259,10 +274,11 @@ class Merge(nn.Module):
 
     def eval(self, users):
         users_feature, bundles_feature = self.propagate()
-        users_feature_atom, users_feature_non_atom = [
+        users_feature_atom, users_feature_non_atom, users_feature_non_atom2 = [
             i[users] for i in users_feature]
-        bundles_feature_atom, bundles_feature_non_atom = bundles_feature
+        bundles_feature_atom, bundles_feature_non_atom, bundles_feature_non_atom2 = bundles_feature
 
-        scores = users_feature_atom @ bundles_feature_atom.T + \
-            users_feature_non_atom @ bundles_feature_non_atom.T
+        scores = (users_feature_atom @ bundles_feature_atom.T +
+                  users_feature_non_atom @ bundles_feature_non_atom.T +
+                  users_feature_non_atom2 @ bundles_feature_non_atom2.T)
         return scores
