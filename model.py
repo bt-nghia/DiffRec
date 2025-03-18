@@ -170,11 +170,11 @@ class Merge(nn.Module):
                                   [bi_graph.T, sp.csr_matrix((bi_graph.shape[1], bi_graph.shape[1]))]])
         self.bi_level_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_level_graph)
 
-        bundle_size = bi_graph.sum(axis=1) + 1e-8
+        bundle_size = bi_graph.sum(axis=1) + 1e-12
         bi_graph = sp.diags(1 / bundle_size.A.ravel()) @ bi_graph
         self.bundle_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(bi_graph)
 
-        user_size = ui_graph.sum(axis=1) + 1e-8
+        user_size = ui_graph.sum(axis=1) + 1e-12
         ui_graph = sp.diags(1 / user_size.A.ravel()) @ ui_graph
         self.users_agg_graph = jax.experimental.sparse.BCOO.from_scipy_sparse(ui_graph)
 
