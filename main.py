@@ -40,7 +40,7 @@ def cal_metrics(
     # score = pred_score + ub_mask_graph_batch * -INF
     # score = ranking_score + ub_mask_graph_batch * -INF
     score = 0.9 * nn.softmax(ranking_score, axis=1) + 0.1 * nn.softmax(pred_score,
-                                                           axis=1) + ub_mask_graph_batch * -INF  # norm by sigmoid
+                                                                       axis=1) + ub_mask_graph_batch * -INF  # norm by sigmoid
     bs = score.shape[0]
     _, col_ids = jax.lax.top_k(score, k=topk)
     row_ids = jnp.broadcast_to(jnp.arange(0, bs).reshape(-1, 1), (bs, topk))
@@ -55,7 +55,7 @@ def cal_metrics(
     # ndcg
     def DCG(hit, topk):
         dcg = hit / \
-            jnp.broadcast_to(jnp.log2(jnp.arange(2, topk + 2)), hit.shape)
+              jnp.broadcast_to(jnp.log2(jnp.arange(2, topk + 2)), hit.shape)
         return dcg.sum(axis=-1)
 
     def IDCG(num_pos, topk):
@@ -296,8 +296,7 @@ def main():
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
-    print(f"DATACLASS: {train_data.__class__.__name__}, {
-          test_data.__class__.__name__}({test_data.task})")
+    print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
     # params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
     params = model.init(rng_model, sample_uids, sample_uids,
                         sample_uids, sample_prob_iids, sample_prob_iids_bundle)
