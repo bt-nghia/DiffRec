@@ -37,6 +37,9 @@ def cal_metrics(
     pred_score = all_gen_buns_batch @ bi_mat.T
     ub_mask_graph_batch = ub_mask_graph_batch.todense()
 
+    # score = (b_idc) * nn.softmax(ranking_score, axis=1) + 1 / (b_idc + 1) * nn.softmax(pred_score, axis=1)
+    # + ub_mask_graph_batch * -INF  # norm by sigmoid
+
     # score = pred_score + ub_mask_graph_batch * -INF
     # score = ranking_score + ub_mask_graph_batch * -INF
     score = 0.9 * nn.softmax(ranking_score, axis=1) + 0.1 * nn.softmax(pred_score,
