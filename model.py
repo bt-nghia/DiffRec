@@ -14,7 +14,7 @@ def normalize(x, p=2, dim=1, eps=1e-12):
         x: Input tensor
         p: Power for the normalization (default: 2)
         dim: Dimension to normalize over (default: 1) 
-        eps: Small value to avoid division by zero (default: 1e-12)
+        eps: Small value to avoid divisimealon by zero (default: 1e-12)
     """
     norm = jnp.linalg.norm(x, ord=p, axis=dim, keepdims=True)
     norm = jnp.maximum(norm, eps)
@@ -107,7 +107,8 @@ class PredLayer(nn.Module):
 
     def setup(self):
         self.n_item = self.conf["n_item"]
-        self.lin = nn.Dense(self.n_item,
+        self.n_dim = self.conf["n_dim"]
+        self.lin = nn.Dense(self.n_dim,
                             kernel_init=nn.initializers.xavier_uniform(),
                             bias_init=nn.initializers.zeros)
 
@@ -116,7 +117,7 @@ class PredLayer(nn.Module):
             x,
             residual_feat
     ):
-        out = self.lin(x) + residual_feat
+        out = self.lin(x)
         logits = nn.sigmoid(out)
         # logits = nn.tanh(out)
         return logits
@@ -138,6 +139,10 @@ class Net(nn.Module):
         self.item_emb = self.param("item_emb",
                                    nn.initializers.xavier_uniform(),
                                    (self.n_items, self.hidden_dim))
+
+        self.bundle_emb = self.param("bundle_emb",
+                                     nn.initializers.xavier_uniform(),
+                                     (self.n_bundles, self.hidden_dim))
         self.encoder = [EncoderLayer(self.conf) for _ in range(self.conf["n_layer"])]
         self.mlp = PredLayer(self.conf)
         self.enc = nn.Dense(self.hidden_dim,
@@ -169,11 +174,14 @@ class Net(nn.Module):
         u_feat, i_feat = jnp.split(all_features, [self.n_users], axis=0)
         return u_feat, i_feat
 
+    def get_b_feats(self, bids):
+        return self.bundle_emb[bids]
+
     def __call__(
             self,
             uids,
             prob_iids,
-            prob_iids_bundle
+            bundle_feat,
     ):
         """
         uids: user ids
@@ -188,7 +196,8 @@ class Net(nn.Module):
             users_feat = l(users_feat)
         users_feat = users_feat.reshape(-1, self.hidden_dim)
 
-        prob_enc = self.enc(prob_iids_bundle)
+        prob_enc = self.enc(bundle_feat)
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
         out_feat = self.mlp(in_feat, prob_iids)
         return out_feat
+

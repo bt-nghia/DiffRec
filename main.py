@@ -83,58 +83,65 @@ def train_step(
         state,
         uids,
         prob_iids,
-        noisy_prob_iids_bundle,
-        prob_iids_bundle
+        noisy_bundle_feat,
+        bundle_feat
 ):
     def loss_fn(
             params,
             uids,
             prob_iids,
-            noisy_prob_iids_bundle,
-            prob_iids_bundle
+            noisy_bundle_feat,
+            bundle_feat,
     ):
-        logits = state.apply_fn(params, uids, prob_iids, noisy_prob_iids_bundle)
-        mse_loss = mse(logits, prob_iids_bundle)  # MSE
+        rbundle_feat = state.apply_fn(params, uids, prob_iids, noisy_bundle_feat)
+        mse_loss = mse(rbundle_feat, bundle_feat)  # MSE
 
-        slogits = nn.softmax(logits, axis=1)
-        sprob_iids = nn.softmax(prob_iids, axis=1)
-        kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
+        # slogits = nn.softmax(logits, axis=1)
+        # sprob_iids = nn.softmax(prob_iids, axis=1)
+        # kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
+        kl_loss = 0
 
         loss = mse_loss + kl_loss
         return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
 
-    aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids, noisy_prob_iids_bundle,
-                                                           prob_iids_bundle)
+    aux, grads = jax.value_and_grad(loss_fn, has_aux=True)(state.params, uids, prob_iids, noisy_bundle_feat,
+                                                           bundle_feat)
     state = state.apply_gradients(grads=grads)
     loss, aux_dict = aux
     return state, loss, aux_dict
 
 
 def train(
+        model,
         state,
         dataloader,
         noise_scheduler,
         epochs,
         device,
-        key
+        key,
+        n_dim
 ):
     print("TRAINING")
 
     for epoch in range(epochs):
         pbar = tqdm(dataloader)
-        for uids, prob_iids, prob_iids_bundle in pbar:
+        for uids, prob_iids, pbid, nbid in pbar:
             uids = jnp.array(uids, dtype=jnp.int32)
             prob_iids = jnp.array(prob_iids, dtype=jnp.float32)
-            prob_iids_bundle = jnp.array(prob_iids_bundle, jnp.float32)
+            # prob_iids_bundle = jnp.array(prob_iids_bundle, jnp.float32)
+            pbid = jnp.array(pbid, dtype=jnp.int32)
+            nbid = jnp.array(nbid, dtype=jnp.int32)
 
             randkey, timekey, key = jax.random.split(key, num=3)
-            noise = jax.random.normal(randkey, shape=prob_iids_bundle.shape)
+            noise = jax.random.normal(randkey, shape=(uids.shape[0], n_dim))
             # noise = jnp.clip(noise, 0)
-            timestep = jax.random.randint(timekey, (prob_iids_bundle.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
+            timestep = jax.random.randint(timekey, (uids.shape[0],), minval=0, maxval=TOTAL_TIMESTEP - 1)
 
-            noisy_prob_iids_bundle = noise_scheduler.add_noise(prob_iids_bundle, noise, timestep)
-            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_prob_iids_bundle,
-                                                                       prob_iids_bundle)
+            bundle_feat = model.apply(state.params, pbid, method=model.get_b_feats)
+
+            noisy_bundle_feat = noise_scheduler.add_noise(bundle_feat, noise, timestep)
+            state, loss, aux_dict = jax.jit(train_step, device=device)(state, uids, prob_iids, noisy_bundle_feat,
+                                                                       bundle_feat)
             pbar.set_description("EPOCH: %i | LOSS: %.4f | KL_LOSS: %.4f | MSE_LOSS: %.4f" % (
                 epoch, aux_dict["loss"], aux_dict["kl"], aux_dict["mse"]))
     return state
@@ -146,7 +153,8 @@ def inference(
         test_dataloader,
         noise_scheduler,
         key,
-        n_item
+        n_item,
+        n_dim
 ):
     all_genbundles = []
     for test_data in test_dataloader:
@@ -154,27 +162,30 @@ def inference(
         uids, prob_iids = test_data
         uids = jnp.array(uids, dtype=jnp.int32)
         prob_iids = jnp.array(prob_iids, jnp.float32)
-        noisy_prob_iids_bundle = jax.random.normal(rand_key, shape=(uids.shape[0], n_item))
+        noisy_bundle_feat = jax.random.normal(rand_key, shape=(uids.shape[0], n_dim))
         # noisy_prob_iids_bundle = jnp.clip(noisy_prob_iids_bundle, 0)
 
-        post_prob_iids_bundle = noisy_prob_iids_bundle
+        post_bundle_feat = noisy_bundle_feat
         for i, t in enumerate(noise_scheduler.timestep):
-            model_output = model.apply(state.params, uids, prob_iids, post_prob_iids_bundle)
-            post_prob_iids_bundle = noise_scheduler.step(model_output, t, post_prob_iids_bundle)
+            model_output = model.apply(state.params, uids, prob_iids, post_bundle_feat)
+            post_bundle_feat = noise_scheduler.step(model_output, t, post_bundle_feat)
 
-        all_genbundles.append(post_prob_iids_bundle)
+        all_genbundles.append(post_bundle_feat)
     all_genbundles = np.concatenate(all_genbundles, axis=0)
     return all_genbundles
 
 
 def eval(
+        model,
+        state,
         conf,
         test_data,
         all_gen_buns
 ):
     batch_size = conf["batch_size"]
     ui_mat = test_data.ui_graph
-    bi_mat = test_data.bi_graph
+    # bi_mat = test_data.bi_graph
+    bi_mat = model.apply(state.params, jnp.arange(0, test_data.num_bundle), method=model.get_b_feats)
     ub_mask_graph = test_data.ub_graph_train
     ub_mat = test_data.ub_graph_test
 
@@ -233,21 +244,22 @@ def main():
     """
     Construct Training/Validating/Testing Data
     """
-    train_data = TrainDataVer2(conf)
+    train_data = TrainDataVer2Latent(conf)
     test_data = TestData(conf, "test")
     valid_data = TestData(conf, "tune")
     """
     Main Model & Optimizer, Train State
     """
     sample_uids = jnp.array([0])
-    sample_prob_iids = jnp.empty((1, conf["n_item"]))
-    sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
+    # sample_prob_iids = jnp.empty((1, conf["n_item"]))
+    # sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
+    sample_bun_feat = jnp.empty((1, conf["n_dim"]))
     model = Net(conf, train_data.ui_graph)
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
-    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_prob_iids_bundle)
+    params = model.init(rng_model, sample_uids, sample_bun_feat, sample_bun_feat)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
@@ -275,7 +287,7 @@ def main():
     """
     Training & Save checkpoint
     """
-    state = train(state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen)
+    state = train(model, state, dataloader, noise_scheduler, conf["epoch"], device, rng_gen, conf["n_dim"])
     # state = train(state, dataloader2, noise_scheduler, conf["epoch"], device, rng_gen2)
     """
     Generate & Evaluate
@@ -288,8 +300,8 @@ def main():
     # eval(conf, valid_data, generated_bundles_valid)
 
     print("TESTING")
-    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
-    eval(conf, test_data, generated_bundles_test)
+    generated_bundles_test = inference(model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"], conf["n_dim"])
+    eval(model, state, conf, test_data, generated_bundles_test)
 
 
 if __name__ == "__main__":
