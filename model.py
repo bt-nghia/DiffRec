@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 import scipy.sparse as sp
@@ -175,7 +176,7 @@ class Net(nn.Module):
         return u_feat, i_feat
 
     def get_b_feats(self, bids):
-        return self.bundle_emb[bids]
+        return jax.lax.stop_gradient(self.bundle_emb[bids])
 
     def __call__(
             self,
