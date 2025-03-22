@@ -182,7 +182,46 @@ class Net(nn.Module):
             self,
             uids,
             prob_iids,
-            bundle_feat,
+            pbid,
+            nbid,
+    ):
+        """
+        uids: user ids
+        prob_iids: user's item probability
+        prob_iids_bundle: sampled item in interacted bundle probability (noise while inference)
+        """
+        p_bundle_feat = self.bundle_emb[pbid]
+        n_bundle_feat = self.bundle_emb[nbid]
+
+        u_feat, i_feat = self.propagate()
+        users_feat = u_feat[uids]
+
+        users_feat = users_feat.reshape(-1, self.n_aspect, self.hidden_dim // self.n_aspect)
+        for l in self.encoder:
+            users_feat = l(users_feat)
+        users_feat = users_feat.reshape(-1, self.hidden_dim)
+
+        pn_bun_feat = jnp.concat((p_bundle_feat, n_bundle_feat), axis=0)
+
+        prob_enc = self.enc(pn_bun_feat)
+        in_feat = jnp.concat([users_feat, prob_enc], axis=1)
+        out_feat = self.mlp(in_feat, prob_iids)
+
+        p_b_feat, n_b_feat = jnp.split(out_feat, pn_bun_feat.shape[0])
+
+        u_feat = self.user_emb[uids]
+        pos_score = jnp.sum(u_feat * p_b_feat, axis=1)
+        neg_score = jnp.sum(u_feat * n_b_feat, axis=1)
+
+        bpr_loss = -jnp.mean(jnp.log(nn.sigmoid(pos_score - neg_score)))
+
+        return out_feat, bpr_loss
+
+    def infer(
+            self,
+            uids,
+            prob_iids,
+            bundle_feat
     ):
         """
         uids: user ids
@@ -201,4 +240,3 @@ class Net(nn.Module):
         in_feat = jnp.concat([users_feat, prob_enc], axis=1)
         out_feat = self.mlp(in_feat, prob_iids)
         return out_feat
-

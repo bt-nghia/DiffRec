@@ -93,13 +93,13 @@ def train_step(
             noisy_bundle_feat,
             bundle_feat,
     ):
-        rbundle_feat = state.apply_fn(params, uids, prob_iids, noisy_bundle_feat)
+        rbundle_feat, bpr_loss = state.apply_fn(params, uids, prob_iids, noisy_bundle_feat)
         mse_loss = mse(rbundle_feat, bundle_feat)  # MSE
 
         # slogits = nn.softmax(logits, axis=1)
         # sprob_iids = nn.softmax(prob_iids, axis=1)
         # kl_loss = kl_divergence(slogits, sprob_iids)  # Kullback-Leibler Divergence (true probability: prob_iids)
-        kl_loss = 0
+        kl_loss = bpr_loss
 
         loss = mse_loss + kl_loss
         return loss, {"loss": loss, "mse": mse_loss, "kl": kl_loss}
@@ -251,15 +251,15 @@ def main():
     Main Model & Optimizer, Train State
     """
     sample_uids = jnp.array([0])
-    # sample_prob_iids = jnp.empty((1, conf["n_item"]))
+    sample_prob_iids = jnp.empty((1, conf["n_item"]))
     # sample_prob_iids_bundle = jnp.empty((1, conf["n_item"]))
-    sample_bun_feat = jnp.empty((1, conf["n_dim"]))
+    sample_bun_feat = [1]
     model = Net(conf, train_data.ui_graph)
 
     conf["model_name"] = model.__class__.__name__
     print(f"MODEL NAME: {conf['model_name']}")
     print(f"DATACLASS: {train_data.__class__.__name__}, {test_data.__class__.__name__}({test_data.task})")
-    params = model.init(rng_model, sample_uids, sample_bun_feat, sample_bun_feat)
+    params = model.init(rng_model, sample_uids, sample_prob_iids, sample_bun_feat, sample_bun_feat)
     param_count = sum(x.size for x in jax.tree.leaves(params))
     print("#PARAMETERS:", param_count)
     optimizer = optax.adam(learning_rate=1e-3)
