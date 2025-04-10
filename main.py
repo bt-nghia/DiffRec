@@ -352,8 +352,8 @@ def main():
     eval(conf, test_data, generated_bundles_test, model, state)
 
     # # save all
-    # with open(os.path.join(conf["data_path"], conf["dataset"], "main_model.pkl"), "wb") as f:
-    #     pickle.dump(state.params, f)
+    with open(os.path.join(conf["data_path"], conf["dataset"], "main_model.pkl"), "wb") as f:
+        pickle.dump(state.params, f)
 
 
 if __name__ == "__main__":
