@@ -42,7 +42,7 @@ def cal_metrics(
 
     # score = pred_score + ub_mask_graph_batch * -INF
     # score = ranking_score + ub_mask_graph_batch * -INF
-    score = 0.9 * nn.softmax(ranking_score, axis=1) + 0.1 * nn.softmax(pred_score,
+    score = 0.1 * nn.softmax(ranking_score, axis=1) + 0.9 * nn.softmax(pred_score,
                                                                        axis=1) + ub_mask_graph_batch * -INF  # norm by sigmoid
     bs = score.shape[0]
     _, col_ids = jax.lax.top_k(score, k=topk)
