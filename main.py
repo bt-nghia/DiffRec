@@ -349,6 +349,9 @@ def main():
     generated_bundles_test = inference(
         model, state, test_dataloader, noise_scheduler, rng_infer_test, conf["n_item"])
     # generated_bundles_test = None
+    
+    np.save(os.path.join(conf["data_path"], conf["dataset"]), generated_bundles_test)
+
     eval(conf, test_data, generated_bundles_test, model, state)
 
     # # save all
